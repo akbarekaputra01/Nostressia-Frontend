@@ -114,6 +114,8 @@ export default function Dashboard() {
   const [hasSubmittedToday, setHasSubmittedToday] = useState(false);
   const [stressScore, setStressScore] = useState(0);
   const [todayLogId, setTodayLogId] = useState(null);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   // Success Modal & Detail
   const [successModal, setSuccessModal] = useState({ visible: false, title: "", text: "" });
@@ -200,6 +202,8 @@ export default function Dashboard() {
     const controller = new AbortController();
 
     const fetchLogs = async () => {
+      setIsLoadingLogs(true);
+      setLoadError("");
       try {
         const token =
           localStorage.getItem("token") ||
@@ -212,6 +216,7 @@ export default function Dashboard() {
           setHasSubmittedToday(false);
           setStressScore(0);
           setTodayLogId(null);
+          setIsLoadingLogs(false);
           return;
         }
 
@@ -286,6 +291,9 @@ export default function Dashboard() {
         setHasSubmittedToday(false);
         setStressScore(0);
         setTodayLogId(null);
+        setLoadError("Gagal memuat data dashboard. Silakan coba lagi.");
+      } finally {
+        setIsLoadingLogs(false);
       }
     };
 
@@ -499,6 +507,14 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           {/* FLIP CARD SECTION */}
           <section className="col-span-1 md:col-span-2 relative" style={{ minHeight: 640 }}>
+            {(isLoadingLogs || loadError) && (
+              <div className="absolute top-3 right-3 z-20 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold shadow-sm backdrop-blur bg-white/80">
+                <span className={`inline-flex h-2 w-2 rounded-full ${loadError ? "bg-red-500" : "bg-blue-500 animate-pulse"}`} />
+                <span className={loadError ? "text-red-600" : "text-blue-700"}>
+                  {loadError ? "Gagal memuat data" : "Memuat data"}
+                </span>
+              </div>
+            )}
             <div style={{ perspective: 1500 }} className="w-full h-full">
               <div className={`absolute inset-0 transition-transform duration-700 transform-style-preserve-3d ${isFlipped ? "rotate-y-180" : ""}`}>
                 
@@ -519,7 +535,6 @@ export default function Dashboard() {
                     <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">Today's Stress Prediction</h2>
                     <div className="text-2xl text-gray-500"><i className="ph ph-cloud-sun mr-2" /> <i className="ph ph-smiley" /></div>
                   </header>
-
                   <div className="flex-grow flex flex-col items-center justify-center text-center relative z-10">
                     {(() => {
                       let ui = { label: "NO DATA", sub: "Let's check your status", color: "#9ca3af", icon: "ph-question", anim: "" };
@@ -586,7 +601,6 @@ export default function Dashboard() {
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                   </header>
-
                   <form
                     onSubmit={handleSaveForm}
                     className="flex-grow overflow-y-auto pr-2 flex flex-col gap-3 transition-all duration-500 custom-scroll"
@@ -687,10 +701,18 @@ export default function Dashboard() {
 
           {/* CALENDAR */}
           <section className="col-span-1 md:col-span-2 p-6 md:p-8 rounded-[20px] bg-white/40 backdrop-blur-md border border-white/20 shadow-xl relative overflow-hidden" style={{ minHeight: 640 }}>
-            <header className="flex justify-between items-center mb-4">
+            <header className="flex flex-wrap justify-between items-center gap-3 mb-4">
               <button className="icon-btn text-gray-600 hover:text-gray-900 transition-colors cursor-pointer" onClick={() => changeMonth(-1)}><i className="ph ph-arrow-left text-xl" /></button>
               <h3 className="text-xl font-bold text-gray-800">{monthNames[month]} {year}</h3>
-              <button className="icon-btn text-gray-600 hover:text-gray-900 transition-colors cursor-pointer" onClick={() => changeMonth(1)}><i className="ph ph-arrow-right text-xl" /></button>
+              <div className="flex items-center gap-2">
+                {(isLoadingLogs || loadError) && (
+                  <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold ${loadError ? "bg-red-50 text-red-600" : "bg-blue-50 text-blue-700"}`}>
+                    <span className={`inline-flex h-2 w-2 rounded-full ${loadError ? "bg-red-500" : "bg-blue-500 animate-pulse"}`} />
+                    {loadError ? "Gagal memuat data" : "Memuat data"}
+                  </div>
+                )}
+                <button className="icon-btn text-gray-600 hover:text-gray-900 transition-colors cursor-pointer" onClick={() => changeMonth(1)}><i className="ph ph-arrow-right text-xl" /></button>
+              </div>
             </header>
             <div className="grid grid-cols-7 gap-1 mb-2 text-center">
               {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (<div key={d} className="text-sm font-bold text-gray-500">{d}</div>))}
