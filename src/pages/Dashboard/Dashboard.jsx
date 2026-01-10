@@ -1,5 +1,5 @@
 // src/pages/Dashboard/Dashboard.jsx
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom"; 
 import { BASE_URL } from "../../api/config";
 import Footer from "../../components/Footer";
@@ -83,64 +83,39 @@ function mapPredictionToUI(label) {
   return { score: 20, color: brandGreen, status: 0 };
 }
 
-function generateMockData() {
-  const data = {};
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  const date = today.getDate();
-
-  for (let i = 1; i < date; i++) {
-    const currentDate = new Date(year, month, i);
-    const dateStr = formatDate(currentDate);
-    
-    const level = Math.floor(Math.random() * (80 - 20 + 1)) + 20;
-    const moodIdx = Math.floor(Math.random() * moods.length);
-    const color = level > 60 ? brandRed : level > 30 ? brandOrange : brandGreen;
-
-    if (Math.random() > 0.15) {
-      data[dateStr] = {
-        level: level,
-        sleep: Math.floor(Math.random() * 5) + 4,
-        study: Math.floor(Math.random() * 6) + 2,
-        extra: Math.floor(Math.random() * 4),
-        social: Math.floor(Math.random() * 4),
-        physical: Math.floor(Math.random() * 3),
-        mood: moods[moodIdx],
-        color: color,
-        isToday: false,
-        isEmpty: false,
-      };
-    }
-  }
-
-  const todayStr = formatDate(today);
-  data[todayStr] = {
-    level: 0,
-    sleep: 0,
-    study: 0,
-    extra: 0,
-    social: 0,
-    physical: 0,
-    mood: "😐",
-    color: "#ccc",
-    isToday: true,
-    isEmpty: true,
+function createEmptyTodayData(todayKey) {
+  return {
+    [todayKey]: {
+      level: 0,
+      sleep: 0,
+      study: 0,
+      extra: 0,
+      social: 0,
+      physical: 0,
+      mood: "😐",
+      color: "#ccc",
+      isToday: true,
+      isEmpty: true,
+    },
   };
-
-  return data;
 }
 
 export default function Dashboard() {
   const { user } = useOutletContext() || { user: {} };
   const userName = user?.name || "Friend";
 
+  const today = new Date();
+  const TODAY_KEY = formatDate(today);
+
   const [isFlipped, setIsFlipped] = useState(false);
    
   // State Data Utama
-  const [stressData, setStressData] = useState(generateMockData());
+  const [stressData, setStressData] = useState(() => createEmptyTodayData(TODAY_KEY));
   const [hasSubmittedToday, setHasSubmittedToday] = useState(false);
   const [stressScore, setStressScore] = useState(0);
+  const [todayLogId, setTodayLogId] = useState(null);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(true);
+  const [logsError, setLogsError] = useState("");
 
   // Success Modal & Detail
   const [successModal, setSuccessModal] = useState({ visible: false, title: "", text: "" });
@@ -167,10 +142,8 @@ export default function Dashboard() {
   const [isQuoteAnimating, setIsQuoteAnimating] = useState(false);
 
   // Calendar State
-  const today = new Date();
   const [calendarDate, setCalendarDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(today);
-  const TODAY_KEY = formatDate(today);
 
   const month = calendarDate.getMonth();
   const year = calendarDate.getFullYear();
@@ -225,6 +198,109 @@ export default function Dashboard() {
     setSleepHours(""); setStudyHours(""); setSocialHours(""); setExtraHours(""); setPhysicalHours(""); setMoodIndex(2);
   }
 
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const fetchLogs = async () => {
+      try {
+        setIsLoadingLogs(true);
+        setLogsError("");
+        const token =
+          localStorage.getItem("token") ||
+          localStorage.getItem("access_token") ||
+          localStorage.getItem("accessToken") ||
+          localStorage.getItem("jwt");
+
+        if (!token) {
+          setStressData(createEmptyTodayData(TODAY_KEY));
+          setHasSubmittedToday(false);
+          setStressScore(0);
+          setTodayLogId(null);
+          setIsLoadingLogs(false);
+          return;
+        }
+
+        const response = await fetch(`${BASE_URL}/stress/my-logs`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request gagal (HTTP ${response.status}).`);
+        }
+
+        const logs = await response.json();
+        const logList = Array.isArray(logs) ? logs : [];
+
+        const byDate = new Map();
+        logList.forEach((log) => {
+          const dt = log?.date ? new Date(log.date) : null;
+          if (!dt || Number.isNaN(dt.getTime())) return;
+          const dateKey = formatDate(new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()));
+          const prev = byDate.get(dateKey);
+          const prevTs = prev?.createdAt ? new Date(prev.createdAt).getTime() : 0;
+          const curTs = log?.createdAt ? new Date(log.createdAt).getTime() : 0;
+          if (!prev || curTs >= prevTs) byDate.set(dateKey, log);
+        });
+
+        const updatedData = {};
+        byDate.forEach((log, dateKey) => {
+          const { score, color } = mapPredictionToUI(log?.stressLevel);
+          const moodIdx = Number(log?.emoji);
+          updatedData[dateKey] = {
+            level: score,
+            sleep: Number(log?.sleepHourPerDay) || 0,
+            study: Number(log?.studyHourPerDay) || 0,
+            extra: Number(log?.extracurricularHourPerDay) || 0,
+            social: Number(log?.socialHourPerDay) || 0,
+            physical: Number(log?.physicalActivityHourPerDay) || 0,
+            mood: moods[moodIdx] || "😐",
+            color,
+            isToday: dateKey === TODAY_KEY,
+            isEmpty: false,
+            logId: log?.id ?? log?._id ?? null,
+          };
+        });
+
+        if (!updatedData[TODAY_KEY]) {
+          Object.assign(updatedData, createEmptyTodayData(TODAY_KEY));
+        }
+
+        setStressData(updatedData);
+
+        const todayData = updatedData[TODAY_KEY];
+        if (todayData && !todayData.isEmpty) {
+          setHasSubmittedToday(true);
+          setStressScore(todayData.level);
+          setTodayLogId(todayData.logId ?? null);
+          const moodIdx = moods.indexOf(todayData.mood);
+          setMoodIndex(moodIdx >= 0 ? moodIdx : 2);
+        } else {
+          setHasSubmittedToday(false);
+          setStressScore(0);
+          setTodayLogId(null);
+        }
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+        console.error("Failed to fetch stress logs:", error);
+        setStressData(createEmptyTodayData(TODAY_KEY));
+        setHasSubmittedToday(false);
+        setStressScore(0);
+        setTodayLogId(null);
+        setLogsError("Gagal memuat data stress. Coba refresh halaman.");
+      } finally {
+        setIsLoadingLogs(false);
+      }
+    };
+
+    fetchLogs();
+    return () => controller.abort();
+  }, [TODAY_KEY]);
+
   function handleOpenForm() {
     const todayData = stressData[TODAY_KEY];
     if (hasSubmittedToday && todayData && !todayData.isEmpty) {
@@ -250,6 +326,64 @@ export default function Dashboard() {
     setGpa(num);
     localStorage.setItem("user_gpa", num); // Simpan ke browser
     setIsEditingGpa(false);
+  }
+
+  async function saveStressLog(status) {
+    const token =
+      localStorage.getItem("token") ||
+      localStorage.getItem("access_token") ||
+      localStorage.getItem("accessToken") ||
+      localStorage.getItem("jwt");
+
+    if (!token) return null;
+
+    const logPayload = {
+      date: TODAY_KEY,
+      stressLevel: status,
+      GPA: Number(gpa),
+      extracurricularHourPerDay: Number(extraHours),
+      physicalActivityHourPerDay: Number(physicalHours),
+      sleepHourPerDay: Number(sleepHours),
+      studyHourPerDay: Number(studyHours),
+      socialHourPerDay: Number(socialHours),
+      emoji: moodIndex,
+    };
+
+    const requestConfig = {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(logPayload),
+    };
+
+    let logResponse = null;
+    if (todayLogId) {
+      logResponse = await fetch(`${BASE_URL}/stress/${todayLogId}`, {
+        method: "PUT",
+        ...requestConfig,
+      });
+      if (!logResponse.ok && (logResponse.status === 404 || logResponse.status === 405)) {
+        logResponse = await fetch(`${BASE_URL}/stress/`, {
+          method: "POST",
+          ...requestConfig,
+        });
+      }
+    } else {
+      logResponse = await fetch(`${BASE_URL}/stress/`, {
+        method: "POST",
+        ...requestConfig,
+      });
+    }
+
+    if (!logResponse.ok) {
+      const logError = await logResponse.json().catch(() => ({}));
+      console.error("Failed to save stress log:", logError);
+      return null;
+    }
+
+    const logData = await logResponse.json().catch(() => null);
+    return logData?.id ?? logData?._id ?? null;
   }
 
   async function handleSaveForm(e) {
@@ -287,6 +421,10 @@ export default function Dashboard() {
       setStressScore(score);
       setHasSubmittedToday(true);
 
+      const savedLogId = await saveStressLog(status);
+      const resolvedLogId = savedLogId ?? todayLogId ?? null;
+      if (savedLogId) setTodayLogId(savedLogId);
+
       setStressData((prev) => ({
         ...prev,
         [TODAY_KEY]: {
@@ -294,41 +432,9 @@ export default function Dashboard() {
           sleep: Number(sleepHours), study: Number(studyHours),
           extra: Number(extraHours), social: Number(socialHours), physical: Number(physicalHours),
           mood: moods[moodIndex], color: color, isToday: true, isEmpty: false,
+          logId: resolvedLogId,
         },
       }));
-
-      const token = localStorage.getItem("token");
-      if (token) {
-        try {
-          const logPayload = {
-            date: TODAY_KEY,
-            stressLevel: status,
-            GPA: Number(gpa),
-            extracurricularHourPerDay: Number(extraHours),
-            physicalActivityHourPerDay: Number(physicalHours),
-            sleepHourPerDay: Number(sleepHours),
-            studyHourPerDay: Number(studyHours),
-            socialHourPerDay: Number(socialHours),
-            emoji: moodIndex,
-          };
-
-          const logResponse = await fetch(`${BASE_URL}/stress/`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(logPayload),
-          });
-
-          if (!logResponse.ok) {
-            const logError = await logResponse.json();
-            console.error("Failed to save stress log:", logError);
-          }
-        } catch (logError) {
-          console.error("Failed to save stress log:", logError);
-        }
-      }
 
       setTimeout(() => {
         setSuccessModal((prev) => ({ ...prev, visible: false }));
@@ -396,6 +502,22 @@ export default function Dashboard() {
             Hello, <span style={{ color: brandBlue }}>{userName}!</span> 👋
           </h1>
           <p className="text-gray-600 mt-2 text-lg font-medium">Ready to navigate the day with more calm?</p>
+          {(isLoadingLogs || logsError) && (
+            <div className="mt-4">
+              {isLoadingLogs && (
+                <div className="inline-flex items-center gap-2 rounded-full bg-white/70 px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm">
+                  <span className="h-2.5 w-2.5 animate-pulse rounded-full" style={{ backgroundColor: brandBlue }} />
+                  Memuat data stress...
+                </div>
+              )}
+              {!isLoadingLogs && logsError && (
+                <div className="inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50/80 px-4 py-2 text-sm font-semibold text-red-700 shadow-sm">
+                  <i className="ph ph-warning-circle text-base" />
+                  {logsError}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
