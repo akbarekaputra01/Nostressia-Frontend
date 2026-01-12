@@ -1,7 +1,12 @@
 import Router from "./router";
+import PreviewGate from "./components/PreviewGate";
 
 function App() {
-  return <Router />;
+  return (
+    <PreviewGate>
+      <Router />
+    </PreviewGate>
+  );
 }
 
 export default App;
