@@ -185,19 +185,22 @@ const addGapSeries = (rows, key, gapKey) => {
 const buildTooltipLabel = (payload, mode) =>
   payload?.payload?.[mode === "week" ? "day" : "week"] || "";
 
+const resolveTooltipLabel = (mode, hover, label, payload) =>
+  hover?.label || label || buildTooltipLabel(payload?.[0], mode);
+
 const moodTooltipValue = (value) => moodEmojis[value - 1] || value;
 
 const renderMoodTooltip =
-  (mode) =>
-  ({ active, payload }) => {
-    if (!active || !payload?.length) return null;
-    const base = payload[0]?.payload;
-    const label = buildTooltipLabel(payload[0], mode);
-    const value = base?.mood;
+  (mode, hover) =>
+  ({ active, payload, label }) => {
+    if (!active) return null;
+    const base = payload?.[0]?.payload;
+    const tooltipLabel = resolveTooltipLabel(mode, hover, label, payload);
+    const value = hover?.value ?? base?.mood;
 
     return (
       <div className="rounded-xl bg-white/90 px-3 py-2 text-sm shadow-lg">
-        <div className="font-semibold text-gray-700">{label}</div>
+        <div className="font-semibold text-gray-700">{tooltipLabel}</div>
         <div className="mt-1">
           {value
             ? `Mood: ${moodTooltipValue(value)}`
@@ -208,16 +211,16 @@ const renderMoodTooltip =
   };
 
 const renderStressTooltip =
-  (mode) =>
-  ({ active, payload }) => {
-    if (!active || !payload?.length) return null;
-    const base = payload[0]?.payload;
-    const label = buildTooltipLabel(payload[0], mode);
-    const value = base?.stress;
+  (mode, hover) =>
+  ({ active, payload, label }) => {
+    if (!active) return null;
+    const base = payload?.[0]?.payload;
+    const tooltipLabel = resolveTooltipLabel(mode, hover, label, payload);
+    const value = hover?.value ?? base?.stress;
 
     return (
       <div className="rounded-xl bg-white/90 px-3 py-2 text-sm shadow-lg">
-        <div className="font-semibold text-gray-700">{label}</div>
+        <div className="font-semibold text-gray-700">{tooltipLabel}</div>
         <div className="mt-1">
           {value
             ? `Stress: ${getStressLabel(value)}`
@@ -230,6 +233,8 @@ const renderStressTooltip =
 export default function Analytics() {
   const [mode, setMode] = useState("week");
   const headerRef = useRef(null);
+  const [stressHover, setStressHover] = useState(null);
+  const [moodHover, setMoodHover] = useState(null);
 
   // Get user from layout
   const { user } = useOutletContext() || {
@@ -481,7 +486,17 @@ export default function Analytics() {
               }`}
             >
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={stressChartData}>
+                <LineChart
+                  data={stressChartData}
+                  onMouseMove={(event) => {
+                    if (!event?.activeLabel) return;
+                    const value = event?.activePayload?.find(
+                      (item) => item?.dataKey === "stress"
+                    )?.value;
+                    setStressHover({ label: event.activeLabel, value });
+                  }}
+                  onMouseLeave={() => setStressHover(null)}
+                >
                   <CartesianGrid stroke="#e5e7eb" strokeDasharray="5 5" />
                   <XAxis
                     dataKey={mode === "week" ? "day" : "week"}
@@ -496,7 +511,10 @@ export default function Analytics() {
                     tickFormatter={(value) => getStressLabel(value)}
                     tickMargin={8}
                   />
-                  <Tooltip content={renderStressTooltip(mode)} />
+                  <Tooltip
+                    active={Boolean(stressHover)}
+                    content={renderStressTooltip(mode, stressHover)}
+                  />
                   <Line
                     type="monotone"
                     dataKey="stressGap"
@@ -562,6 +580,14 @@ export default function Analytics() {
                 <LineChart
                   data={moodChartData}
                   margin={{ top: 12, right: 8, left: 12, bottom: 4 }}
+                  onMouseMove={(event) => {
+                    if (!event?.activeLabel) return;
+                    const value = event?.activePayload?.find(
+                      (item) => item?.dataKey === "mood"
+                    )?.value;
+                    setMoodHover({ label: event.activeLabel, value });
+                  }}
+                  onMouseLeave={() => setMoodHover(null)}
                 >
                   <CartesianGrid stroke="#e5e7eb" strokeDasharray="5 5" />
                   <XAxis
@@ -579,7 +605,10 @@ export default function Analytics() {
                     tickMargin={8}
                     padding={{ top: 6, bottom: 6 }}
                   />
-                  <Tooltip content={renderMoodTooltip(mode)} />
+                  <Tooltip
+                    active={Boolean(moodHover)}
+                    content={renderMoodTooltip(mode, moodHover)}
+                  />
                   <Line
                     type="monotone"
                     dataKey="moodGap"
