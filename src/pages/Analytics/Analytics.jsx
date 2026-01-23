@@ -27,6 +27,10 @@ const clampNumber = (v, fallback = 0) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+// Expects value 1..3
+// 1 -> index 0 (Low)
+// 2 -> index 1 (Moderate)
+// 3 -> index 2 (High)
 const getStressLabel = (value) => {
   if (!value) return "-";
   const idx = Math.min(
@@ -90,10 +94,10 @@ const buildWeekSeries = (logs) => {
     const row = byDate.get(key);
     return {
       day: weekdayShort(d),
-      // stress: 1..3
-      stress: row ? clampNumber(row.stressLevel, 0) : null,
-      // mood: from emoji (integer). If you store 1..5 this will work directly.
-      mood: row ? clampNumber(row.emoji, 0) : null,
+      // FIX: Add +1 because API returns 0..2 but UI expects 1..3
+      stress: row ? clampNumber(row.stressLevel, 0) + 1 : null,
+      // FIX: Add +1 because API returns 0..4 but UI expects 1..5
+      mood: row ? clampNumber(row.emoji, 0) + 1 : null,
       _date: key,
     };
   });
@@ -118,8 +122,10 @@ const buildMonthSeries = (logs) => {
 
     const diffDays = Math.floor((dt.getTime() - start.getTime()) / 86400000);
     const idx = Math.min(3, Math.max(0, Math.floor(diffDays / 7)));
-    buckets[idx].stressSum += clampNumber(it.stressLevel, 0);
-    buckets[idx].moodSum += clampNumber(it.emoji, 0);
+    
+    // FIX: Add +1 to raw values before summing
+    buckets[idx].stressSum += (clampNumber(it.stressLevel, 0) + 1);
+    buckets[idx].moodSum += (clampNumber(it.emoji, 0) + 1);
     buckets[idx].count += 1;
   });
 
@@ -144,8 +150,9 @@ const calcMode = (values) => {
 };
 
 const calcSummary = (logsInRange) => {
-  const stressVals = (logsInRange || []).map((d) => d?.stressLevel);
-  const moodVals = (logsInRange || []).map((d) => d?.emoji);
+  // FIX: Normalize raw data by adding +1 before calculating stats
+  const stressVals = (logsInRange || []).map((d) => (d?.stressLevel ?? 0) + 1);
+  const moodVals = (logsInRange || []).map((d) => (d?.emoji ?? 0) + 1);
 
   const nonZeroStress = stressVals
     .map((v) => clampNumber(v, 0))
