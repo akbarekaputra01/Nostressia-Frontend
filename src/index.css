@@ -1,42 +1,88 @@
-@import url("https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Patrick+Hand&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
+@config "../tailwind.config.js";
 @import "tailwindcss";
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
 
 @layer base {
   :root {
     /* ===== Typography ===== */
     --font-base: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
-    /* ===== Primary Brand Colors ===== */
-    --brand-blue: #3664ba; /* Dari logo */
-    --brand-orange: #f2994a; /* Aksen oranye */
-    --brand-blue-light: #2f80ed; /* Biru terang */
+    /* ===== Brand Palette (RGB values) ===== */
+    --brand-primary: 1 98 241; /* #0162F1 */
+    --brand-info: 0 164 255; /* #00A4FF */
+    --brand-accent: 255 103 0; /* #FF6700 */
+    --brand-warning: 255 191 0; /* #FFBF00 */
+    --neutral-950: 20 19 19; /* #141313 */
 
-    /* ===== Text Colors ===== */
-    --text-primary: #333333;
-    --text-secondary: #666666;
+    /* ===== Neutral Tints/Shades (derived from #141313) ===== */
+    --neutral-900: 31 29 29;
+    --neutral-800: 42 38 38;
+    --neutral-700: 59 52 52;
+    --neutral-600: 90 80 80;
+    --neutral-500: 122 112 112;
+    --neutral-400: 160 151 151;
+    --neutral-300: 200 192 192;
+    --neutral-200: 228 222 222;
+    --neutral-100: 242 237 237;
+    --neutral-50: 251 248 248;
 
-    /* ===== Accent Colors (Optional) ===== */
-    --accent-yellow: #f2994a; /* Warna aksen */
+    /* ===== Core Tokens ===== */
+    --bg: var(--neutral-50);
+    --surface: var(--neutral-50);
+    --surface-elevated: var(--neutral-50);
+    --surface-muted: var(--neutral-100);
+    --text-primary: var(--neutral-950);
+    --text-secondary: var(--neutral-700);
+    --text-muted: var(--neutral-600);
+    --text-inverse: 255 255 255;
+    --border-color: var(--neutral-200);
+    --border-subtle: var(--neutral-100);
+
+    --primary: var(--brand-primary);
+    --primary-contrast: 255 255 255;
+    --secondary: var(--brand-info);
+    --accent: var(--brand-accent);
+    --warning: var(--brand-warning);
+    --info: var(--brand-info);
+    --success: var(--brand-info);
+    --danger: var(--brand-accent);
+    --focus-ring: var(--brand-primary);
+
+    --shadow-color: var(--neutral-950);
 
     /* ===== Glassmorphism ===== */
-    --glass-bg: rgba(255, 255, 255, 0.4);
-    --glass-border: rgba(255, 255, 255, 0.2);
-    --glass-shadow: rgba(0, 0, 0, 0.05);
+    --glass-bg: var(--neutral-50);
+    --glass-border: var(--neutral-200);
+    --glass-highlight: var(--brand-info);
 
     /* ===== Background Gradients ===== */
-    --bg-gradient-cream: #fff3e0; /* Cream oranye */
-    --bg-gradient-pink: #eaf2ff; /* Pink muda */
-    --bg-gradient-lavender: #e3edff; /* Lavender muda */
+    --bg-gradient-sun: 255 231 173;
+    --bg-gradient-orange: 255 190 148;
+    --bg-gradient-sky: 189 232 255;
+    --bg-gradient-ocean: 175 206 255;
+    --bg-gradient-ink: 36 32 32;
+
+    --skeleton-bg: var(--neutral-100);
+    --skeleton-shine: var(--neutral-50);
+
+    --journal-paper: var(--neutral-50);
+    --journal-paper-muted: 255 250 245;
+    --journal-line: var(--neutral-200);
+    --journal-ink: var(--neutral-800);
   }
 
   body {
     font-family: var(--font-base);
-    color: var(--text-primary);
-    background-color: #ffffff;
+    color: rgb(var(--text-primary));
+    background-color: rgb(var(--bg));
+  }
+
+  body,
+  button,
+  input,
+  select,
+  textarea {
+    font-family: var(--font-base);
   }
 
   h1,
@@ -50,5 +96,90 @@
   h5,
   h6 {
     font-weight: 700;
+  }
+
+  .dark {
+    --bg: var(--neutral-950);
+    --surface: 28 25 25;
+    --surface-elevated: 34 30 30;
+    --surface-muted: 36 32 32;
+    --text-primary: 249 246 246;
+    --text-secondary: 209 202 202;
+    --text-muted: 176 166 166;
+    --text-inverse: 20 19 19;
+    --border-color: 52 46 46;
+    --border-subtle: 45 40 40;
+
+    --glass-bg: 28 25 25;
+    --glass-border: 60 54 54;
+    --glass-highlight: var(--brand-primary);
+
+    --bg-gradient-sun: 63 52 16;
+    --bg-gradient-orange: 78 44 24;
+    --bg-gradient-sky: 20 46 66;
+    --bg-gradient-ocean: 19 34 72;
+    --bg-gradient-ink: 20 19 19;
+
+    --skeleton-bg: 40 35 35;
+    --skeleton-shine: 72 66 66;
+
+    --journal-paper: 31 28 28;
+    --journal-paper-muted: 28 25 25;
+    --journal-line: 60 54 54;
+    --journal-ink: 235 230 230;
+  }
+}
+
+@layer utilities {
+  .text-muted {
+    color: rgb(var(--text-muted));
+  }
+
+  .bg-surface {
+    background-color: rgb(var(--surface));
+  }
+
+  .bg-surface-elevated {
+    background-color: rgb(var(--surface-elevated));
+  }
+
+  .bg-surface-muted {
+    background-color: rgb(var(--surface-muted));
+  }
+
+  .glass-panel {
+    background: linear-gradient(
+        135deg,
+        rgb(var(--glass-bg) / 0.78),
+        rgb(var(--surface-elevated) / 0.65)
+      );
+    border: 1px solid rgb(var(--glass-border) / 0.7);
+    box-shadow: 0 12px 30px rgb(var(--shadow-color) / 0.18);
+    backdrop-filter: blur(16px);
+  }
+
+  .glass-panel-strong {
+    background: linear-gradient(
+        160deg,
+        rgb(var(--glass-bg) / 0.82),
+        rgb(var(--surface-elevated) / 0.72)
+      );
+    border: 1px solid rgb(var(--glass-border) / 0.85);
+    box-shadow: 0 18px 45px rgb(var(--shadow-color) / 0.22);
+    backdrop-filter: blur(20px);
+  }
+
+  .glass-chip {
+    background: rgb(var(--surface-muted) / 0.85);
+    border: 1px solid rgb(var(--glass-border) / 0.7);
+    box-shadow: inset 0 1px 0 rgb(var(--glass-highlight) / 0.2);
+    backdrop-filter: blur(12px);
+  }
+
+  .glass-input {
+    background: rgb(var(--surface-elevated) / 0.75);
+    border: 1px solid rgb(var(--glass-border) / 0.7);
+    box-shadow: inset 0 1px 0 rgb(var(--glass-highlight) / 0.15);
+    backdrop-filter: blur(12px);
   }
 }

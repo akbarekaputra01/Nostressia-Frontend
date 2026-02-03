@@ -1,8 +1,16 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useOutletContext } from "react-router-dom";
 import Navbar from "../../components/Navbar";
 import Footer from "../../components/Footer";
-import { BarChart3 } from "lucide-react";
+import PageMeta from "../../components/PageMeta";
+import {
+  Activity,
+  BarChart3,
+  BookOpen,
+  Flame,
+  Sparkles,
+  TrendingUp,
+} from "lucide-react";
 import {
   LineChart,
   Line,
@@ -12,11 +20,14 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { getAnalyticsSummary } from "../../services/analyticsService";
+import { getMyStressLogs } from "../../services/stressService";
+import { resolveDisplayedStreak } from "../../utils/streak";
 
 // --- BACKGROUND CONFIGURATION (SAME AS DASHBOARD) ---
-const bgCream = "#FFF3E0";
-const bgPink = "#eaf2ff";
-const bgLavender = "#e3edff";
+const bgSun = "rgb(var(--bg-gradient-sun))";
+const bgOrange = "rgb(var(--bg-gradient-orange))";
+const bgSky = "rgb(var(--bg-gradient-sky))";
 const moodEmojis = ["😢", "😕", "😐", "😊", "😄"];
 const stressLabels = ["Low", "Moderate", "High"];
 
@@ -26,11 +37,17 @@ const clampNumber = (v, fallback = 0) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+const normalizeAnalyticsValue = (value, max) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(max, Math.max(0, n) + 1);
+};
+
 const getStressLabel = (value) => {
   if (!value) return "-";
   const idx = Math.min(
     stressLabels.length - 1,
-    Math.max(0, Math.round(value) - 1)
+    Math.max(0, Math.round(value) - 1),
   );
   return stressLabels[idx];
 };
@@ -90,9 +107,9 @@ const buildWeekSeries = (logs) => {
     return {
       day: weekdayShort(d),
       // stress: 1..3
-      stress: row ? clampNumber(row.stressLevel, 0) : null,
+      stress: row ? normalizeAnalyticsValue(row.stressLevel, 3) : null,
       // mood: from emoji (integer). If you store 1..5 this will work directly.
-      mood: row ? clampNumber(row.emoji, 0) : null,
+      mood: row ? normalizeAnalyticsValue(row.emoji, 5) : null,
       _date: key,
     };
   });
@@ -117,8 +134,10 @@ const buildMonthSeries = (logs) => {
 
     const diffDays = Math.floor((dt.getTime() - start.getTime()) / 86400000);
     const idx = Math.min(3, Math.max(0, Math.floor(diffDays / 7)));
-    buckets[idx].stressSum += clampNumber(it.stressLevel, 0);
-    buckets[idx].moodSum += clampNumber(it.emoji, 0);
+    const stressValue = normalizeAnalyticsValue(it.stressLevel, 3);
+    const moodValue = normalizeAnalyticsValue(it.emoji, 5);
+    if (stressValue !== null) buckets[idx].stressSum += stressValue;
+    if (moodValue !== null) buckets[idx].moodSum += moodValue;
     buckets[idx].count += 1;
   });
 
@@ -138,17 +157,20 @@ const calcMode = (values) => {
     counts.set(n, (counts.get(n) || 0) + 1);
   });
   if (!counts.size) return 0;
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0];
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0];
 };
 
 const calcSummary = (logsInRange) => {
-  const stressVals = (logsInRange || []).map((d) => d?.stressLevel);
-  const moodVals = (logsInRange || []).map((d) => d?.emoji);
+  const stressVals = (logsInRange || []).map((d) =>
+    normalizeAnalyticsValue(d?.stressLevel, 3),
+  );
+  const moodVals = (logsInRange || []).map((d) =>
+    normalizeAnalyticsValue(d?.emoji, 5),
+  );
 
-  const nonZeroStress = stressVals
-    .map((v) => clampNumber(v, 0))
-    .filter((x) => x > 0);
+  const nonZeroStress = stressVals.filter(
+    (value) => Number.isFinite(value) && value > 0,
+  );
 
   const avgStress = nonZeroStress.length
     ? nonZeroStress.reduce((sum, v) => sum + v, 0) / nonZeroStress.length
@@ -200,12 +222,14 @@ const renderMoodTooltip =
     const hasValue = Number.isFinite(value) && value > 0;
 
     return (
-      <div className="rounded-xl bg-white/90 px-3 py-2 text-sm shadow-lg">
-        <div className="font-semibold text-gray-700">{label}</div>
-        <div className="mt-1">
+      <div className="rounded-xl border border-border bg-surface-elevated/90 px-3 py-2 text-sm shadow-lg dark:border-border dark:bg-surface/90">
+        <div className="font-semibold text-text-secondary dark:text-text-primary">
+          {label}
+        </div>
+        <div className="mt-1 text-text-secondary dark:text-text-muted">
           {hasValue
             ? `Mood: ${moodTooltipValue(value)}`
-            : "Tidak ada data pada titik ini."}
+            : "No data available at this point."}
         </div>
       </div>
     );
@@ -221,12 +245,14 @@ const renderStressTooltip =
     const hasValue = Number.isFinite(value) && value > 0;
 
     return (
-      <div className="rounded-xl bg-white/90 px-3 py-2 text-sm shadow-lg">
-        <div className="font-semibold text-gray-700">{label}</div>
-        <div className="mt-1">
+      <div className="rounded-xl border border-border bg-surface-elevated/90 px-3 py-2 text-sm shadow-lg dark:border-border dark:bg-surface/90">
+        <div className="font-semibold text-text-secondary dark:text-text-primary">
+          {label}
+        </div>
+        <div className="mt-1 text-text-secondary dark:text-text-muted">
           {hasValue
             ? `Stress: ${getStressLabel(value)}`
-            : "Tidak ada data pada titik ini."}
+            : "No data available at this point."}
         </div>
       </div>
     );
@@ -245,6 +271,7 @@ export default function Analytics() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
+  const [summary, setSummary] = useState(null);
 
   useEffect(() => {
     if (!headerRef.current) return;
@@ -252,61 +279,36 @@ export default function Analytics() {
     headerRef.current.style.transform = "translateY(0)";
   }, []);
 
+  const fetchAnalytics = useCallback(async () => {
+    try {
+      setLoading(true);
+      setErrorMsg("");
+
+      const data = await getMyStressLogs();
+      setLogs(Array.isArray(data) ? data : []);
+      const summaryData = await getAnalyticsSummary();
+      setSummary(summaryData);
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+      setErrorMsg(err?.message || "Failed to fetch stress logs.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Fetch logs (protected endpoint)
   useEffect(() => {
-    const controller = new AbortController();
+    fetchAnalytics();
 
-    const fetchLogs = async () => {
-      try {
-        setLoading(true);
-        setErrorMsg("");
-
-        const API_BASE = "https://akbarekaputra01-nostressia-backend.hf.space";
-        const token =
-          localStorage.getItem("token") ||
-          localStorage.getItem("access_token") ||
-          localStorage.getItem("accessToken") ||
-          localStorage.getItem("jwt");
-
-        const res = await fetch(`${API_BASE}/api/stress/my-logs`, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          signal: controller.signal,
-        });
-
-        if (!res.ok) {
-          let detail = "";
-          try {
-            const j = await res.json();
-            detail = j?.detail ? String(j.detail) : "";
-          } catch {
-            /* ignore */
-          }
-
-          if (res.status === 401) {
-            throw new Error(
-              detail || "Unauthorized (401). Please ensure your login token exists."
-            );
-          }
-          throw new Error(detail || `Request failed (HTTP ${res.status}).`);
-        }
-
-        const data = await res.json();
-        setLogs(Array.isArray(data) ? data : []);
-      } catch (err) {
-        if (err?.name === "AbortError") return;
-        setErrorMsg(err?.message || "Failed to fetch stress logs.");
-      } finally {
-        setLoading(false);
-      }
+    const handleRefresh = () => {
+      fetchAnalytics();
     };
 
-    fetchLogs();
-    return () => controller.abort();
-  }, []);
+    window.addEventListener("nostressia:user-update", handleRefresh);
+    return () => {
+      window.removeEventListener("nostressia:user-update", handleRefresh);
+    };
+  }, [fetchAnalytics]);
 
   // ===== Derived chart data =====
   const weekData = useMemo(() => buildWeekSeries(logs), [logs]);
@@ -315,49 +317,51 @@ export default function Analytics() {
   const rangeLogs = useMemo(() => getLogsInRange(logs, mode), [logs, mode]);
   const stressChartData = useMemo(
     () => addGapSeries(data, "stress", "stressGap"),
-    [data]
+    [data],
   );
   const moodChartData = useMemo(
     () => addGapSeries(data, "mood", "moodGap"),
-    [data]
+    [data],
   );
 
   const { modeStress, modeMood, avgStress } = useMemo(
     () => calcSummary(rangeLogs),
-    [rangeLogs]
+    [rangeLogs],
   );
+
+  const streakValue = resolveDisplayedStreak(user?.streak ?? summary?.streak ?? 0);
+  const modeLabel = mode === "week" ? "Weekly" : "Monthly";
 
   return (
     <div
       className="min-h-screen relative flex flex-col"
       style={{
-        backgroundColor: bgCream,
-        backgroundImage: `radial-gradient(at 10% 10%, ${bgCream} 0%, transparent 50%), radial-gradient(at 90% 20%, ${bgPink} 0%, transparent 50%), radial-gradient(at 50% 80%, ${bgLavender} 0%, transparent 50%)`,
+        backgroundColor: bgSun,
+        backgroundImage: `radial-gradient(at 10% 10%, ${bgSun} 0%, transparent 50%), radial-gradient(at 90% 20%, ${bgOrange} 0%, transparent 50%), radial-gradient(at 50% 80%, ${bgSky} 0%, transparent 50%)`,
         backgroundSize: "200% 200%",
         animation: "gradient-bg 20s ease infinite",
       }}
     >
+      <PageMeta
+        title="Analytics"
+        description="Analyze stress trends and mental wellness progress with Nostressia statistics and charts."
+      />
       <style>{`
         @keyframes gradient-bg { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
         @keyframes shimmer-slide { 100% { transform: translateX(100%); } }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse-soft { 0%, 100% { opacity: 0.7; transform: scale(0.98); } 50% { opacity: 1; transform: scale(1); } }
         .skeleton {
           position: relative;
           overflow: hidden;
-          background-color: rgba(255,255,255,0.65);
+          background-color: rgb(var(--skeleton-bg));
         }
         .skeleton::after {
           content: "";
           position: absolute;
           inset: 0;
           transform: translateX(-100%);
-          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.7), transparent);
+          background: linear-gradient(90deg, transparent, rgb(var(--skeleton-shine)), transparent);
           animation: shimmer-slide 1.6s infinite;
         }
-        .spin-slow { animation: spin 1.4s linear infinite; }
-        .spin-reverse { animation: spin 2.1s linear infinite reverse; }
-        .pulse-soft { animation: pulse-soft 1.8s ease-in-out infinite; }
       `}</style>
 
       <Navbar activeLink="Analytics" user={user} />
@@ -370,21 +374,16 @@ export default function Analytics() {
         >
           <div className="mb-10 md:mb-14 text-center">
             <div className="flex items-center gap-3 mb-3 justify-center">
-              <BarChart3 className="w-8 h-8 md:w-10 md:h-10 text-[var(--brand-blue)] drop-shadow-lg" />
+              <BarChart3 className="w-8 h-8 md:w-10 md:h-10 text-brand-primary drop-shadow-lg" />
 
-              <h1
-                className="text-3xl md:text-5xl font-extrabold bg-gradient-to-r
-                from-[var(--brand-blue)]
-                to-[var(--brand-blue-light)]
-                bg-clip-text text-transparent drop-shadow-md"
-              >
+              <h1 className="text-3xl md:text-5xl font-extrabold bg-gradient-to-r from-brand-primary to-brand-info bg-clip-text text-transparent drop-shadow-md">
                 Analytics
               </h1>
             </div>
 
             <p
               className="text-sm md:text-lg font-medium drop-shadow-sm px-4"
-              style={{ color: "var(--text-secondary)" }}
+              style={{ color: "rgb(var(--text-secondary))" }}
             >
               Track your stress and mood patterns in weekly or monthly views.
             </p>
@@ -394,24 +393,25 @@ export default function Analytics() {
         {/* INFO STATE */}
         <div className="max-w-3xl mx-auto mb-6">
           {!loading && errorMsg && (
-            <div className="bg-white/60 border border-white/30 rounded-2xl p-4 text-center shadow-sm backdrop-blur">
+            <div className="bg-surface/60 border border-border/30 rounded-2xl p-4 text-center shadow-sm backdrop-blur">
               <p className="text-sm md:text-base font-medium text-red-600">
                 {errorMsg}
               </p>
               <p
                 className="text-xs md:text-sm mt-1"
-                style={{ color: "var(--text-secondary)" }}
+                style={{ color: "rgb(var(--text-secondary))" }}
               >
-                Endpoint: <span className="font-mono">/api/stress/my-logs</span>
+                Endpoint:{" "}
+                <span className="font-sans">/api/stress-levels/my-logs</span>
               </p>
             </div>
           )}
 
           {!loading && !errorMsg && logs?.length === 0 && (
-            <div className="bg-white/50 border border-white/30 rounded-2xl p-4 text-center shadow-sm backdrop-blur">
+            <div className="bg-surface/50 border border-border/30 rounded-2xl p-4 text-center shadow-sm backdrop-blur">
               <p
                 className="text-sm md:text-base"
-                style={{ color: "var(--text-secondary)" }}
+                style={{ color: "rgb(var(--text-secondary))" }}
               >
                 No stress logs yet. Try running a prediction or saving a log 🙂
               </p>
@@ -421,13 +421,13 @@ export default function Analytics() {
 
         {/* TOGGLE BUTTONS */}
         <div className="flex justify-center mb-8 md:mb-10">
-          <div className="bg-white/40 backdrop-blur-lg p-1.5 md:p-2 rounded-full shadow-lg border border-white/30 flex gap-2">
+          <div className="bg-surface/40 backdrop-blur-lg p-1.5 md:p-2 rounded-full shadow-lg border border-border/30 flex gap-2">
             <button
               onClick={() => setMode("week")}
               className={`px-4 md:px-5 py-2 rounded-full text-xs md:text-sm font-medium transition cursor-pointer ${
                 mode === "week"
-                  ? "bg-[var(--brand-orange)] text-white shadow-md"
-                  : "text-[var(--text-secondary)] hover:bg-white/30"
+                  ? "bg-brand-accent text-text-inverse shadow-md"
+                  : "text-text-secondary hover:bg-surface/40"
               }`}
             >
               Weekly
@@ -436,8 +436,8 @@ export default function Analytics() {
               onClick={() => setMode("month")}
               className={`px-4 md:px-5 py-2 rounded-full text-xs md:text-sm font-medium transition cursor-pointer ${
                 mode === "month"
-                  ? "bg-[var(--brand-orange)] text-white shadow-md"
-                  : "text-[var(--text-secondary)] hover:bg-white/30"
+                  ? "bg-brand-accent text-text-inverse shadow-md"
+                  : "text-text-secondary hover:bg-surface/40"
               }`}
             >
               Monthly
@@ -449,33 +449,21 @@ export default function Analytics() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 mb-8 md:mb-10">
           {/* Stress Chart */}
           <div
-            className="relative rounded-2xl p-4 md:p-6 border backdrop-blur-xl"
+            className="relative rounded-2xl p-4 md:p-6 border backdrop-blur-xl overflow-hidden"
             style={{
-              background: "rgba(255,255,255,0.45)",
-              borderColor: "var(--glass-border)",
+              background: "rgb(var(--glass-bg) / 0.7)",
+              borderColor: "rgb(var(--glass-border) / 0.5)",
               boxShadow: "0 8px 30px rgba(0,0,0,0.07)",
             }}
           >
             {loading && (
-              <div className="absolute inset-0 z-10 rounded-2xl bg-white/70 backdrop-blur-sm p-4 md:p-6">
-                <div className="relative h-full w-full rounded-2xl border border-white/40 bg-white/60 p-4 md:p-6 shadow-inner">
-                  <div className="skeleton h-5 w-40 rounded-full mb-4" />
-                  <div className="skeleton h-full w-full rounded-2xl" />
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
-                    <div className="relative flex items-center justify-center">
-                      <div className="h-14 w-14 rounded-full border-4 border-blue-200 border-t-blue-500 spin-slow" />
-                      <div className="absolute h-9 w-9 rounded-full border-4 border-orange-200 border-t-orange-500 spin-reverse" />
-                    </div>
-                    <p className="text-center text-sm font-semibold text-gray-500 pulse-soft">
-                      Loading stress analytics...
-                    </p>
-                  </div>
-                </div>
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-surface/70 backdrop-blur-sm">
+                <div className="h-12 w-12 rounded-full border-4 border-brand-primary/30 border-t-brand-primary animate-spin" />
               </div>
             )}
             <h2
               className="text-lg md:text-xl font-semibold mb-4 text-center md:text-left"
-              style={{ color: "var(--brand-blue)" }}
+              style={{ color: "rgb(var(--brand-primary))" }}
             >
               Stress Trend ({mode})
             </h2>
@@ -487,7 +475,10 @@ export default function Analytics() {
             >
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={stressChartData}>
-                  <CartesianGrid stroke="#e5e7eb" strokeDasharray="5 5" />
+                  <CartesianGrid
+                    stroke="rgb(var(--neutral-200))"
+                    strokeDasharray="5 5"
+                  />
                   <XAxis
                     dataKey={mode === "week" ? "day" : "week"}
                     tick={{ fontSize: 12 }}
@@ -495,7 +486,7 @@ export default function Analytics() {
                   <YAxis
                     tick={{ fontSize: 12 }}
                     width={70}
-                    domain={[0, 3]}
+                    domain={[0, 3.5]}
                     ticks={[1, 2, 3]}
                     allowDecimals={false}
                     tickFormatter={(value) => getStressLabel(value)}
@@ -508,7 +499,7 @@ export default function Analytics() {
                   <Line
                     type="linear"
                     dataKey="stressGap"
-                    stroke="var(--brand-blue)"
+                    stroke="rgb(var(--brand-primary))"
                     strokeWidth={2}
                     strokeDasharray="6 6"
                     dot={false}
@@ -518,7 +509,7 @@ export default function Analytics() {
                   <Line
                     type="linear"
                     dataKey="stress"
-                    stroke="var(--brand-blue)"
+                    stroke="rgb(var(--brand-primary))"
                     strokeWidth={3}
                     dot={{ r: 4, strokeWidth: 2 }}
                     activeDot={{ r: 6 }}
@@ -532,35 +523,23 @@ export default function Analytics() {
 
           {/* Mood Chart */}
           <div
-            className="relative rounded-2xl p-4 md:p-6 border backdrop-blur-xl"
+            className="relative rounded-2xl p-4 md:p-6 border backdrop-blur-xl overflow-hidden"
             style={{
-              background: "rgba(255,255,255,0.45)",
-              borderColor: "var(--glass-border)",
+              background: "rgb(var(--glass-bg) / 0.7)",
+              borderColor: "rgb(var(--glass-border) / 0.5)",
               boxShadow: "0 8px 30px rgba(0,0,0,0.07)",
             }}
           >
             {loading && (
-              <div className="absolute inset-0 z-10 rounded-2xl bg-white/70 backdrop-blur-sm p-4 md:p-6">
-                <div className="relative h-full w-full rounded-2xl border border-white/40 bg-white/60 p-4 md:p-6 shadow-inner">
-                  <div className="skeleton h-5 w-40 rounded-full mb-4" />
-                  <div className="skeleton h-full w-full rounded-2xl" />
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
-                    <div className="relative flex items-center justify-center">
-                      <div className="h-14 w-14 rounded-full border-4 border-blue-200 border-t-blue-500 spin-slow" />
-                      <div className="absolute h-9 w-9 rounded-full border-4 border-orange-200 border-t-orange-500 spin-reverse" />
-                    </div>
-                    <p className="text-center text-sm font-semibold text-gray-500 pulse-soft">
-                      Loading mood analytics...
-                    </p>
-                  </div>
-                </div>
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-surface/70 backdrop-blur-sm">
+                <div className="h-12 w-12 rounded-full border-4 border-brand-primary/30 border-t-brand-primary animate-spin" />
               </div>
             )}
             <h2
               className="text-lg md:text-xl font-semibold mb-4 text-center md:text-left"
-              style={{ color: "var(--brand-blue)" }}
+              style={{ color: "rgb(var(--brand-primary))" }}
             >
-              Mood Trend ({mode})
+              Mood Trend · {modeLabel}
             </h2>
 
             <div
@@ -571,39 +550,36 @@ export default function Analytics() {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart
                   data={moodChartData}
-                  margin={{ top: 12, right: 8, left: 12, bottom: 4 }}
+                  margin={{ top: 0, right: 8, left: 12, bottom: 4 }}
                 >
-                  <CartesianGrid stroke="#e5e7eb" strokeDasharray="5 5" />
+                  <CartesianGrid
+                    stroke="rgb(var(--neutral-200))"
+                    strokeDasharray="5 5"
+                    vertical={false}
+                  />
                   <XAxis
                     dataKey={mode === "week" ? "day" : "week"}
                     tick={{ fontSize: 12 }}
                   />
                   <YAxis
-                    tick={{ fontSize: 22 }}
-                    width={64}
-                    domain={[0, 5]}
+                    tick={{ fontSize: 16 }}
+                    width={54}
+                    domain={[0, 5.5]}
                     ticks={[1, 2, 3, 4, 5]}
                     interval={0}
                     allowDecimals={false}
                     tickFormatter={(value) => moodTooltipValue(value)}
-                    tickMargin={8}
-                    padding={{ top: 6, bottom: 6 }}
+                    tickMargin={10}
+                    padding={{ top: 0, bottom: 0 }}
                   />
-                  <Tooltip content={renderMoodTooltip(mode)} filterNull={false} />
-                  <Line
-                    type="linear"
-                    dataKey="moodGap"
-                    stroke="var(--brand-blue-light)"
-                    strokeWidth={2}
-                    strokeDasharray="6 6"
-                    dot={false}
-                    connectNulls
-                    isAnimationActive={false}
+                  <Tooltip
+                    content={renderMoodTooltip(mode)}
+                    filterNull={false}
                   />
                   <Line
                     type="linear"
                     dataKey="mood"
-                    stroke="var(--brand-blue-light)"
+                    stroke="rgb(var(--brand-info))"
                     strokeWidth={3}
                     dot={{ r: 4, strokeWidth: 2 }}
                     activeDot={{ r: 6 }}
@@ -616,43 +592,132 @@ export default function Analytics() {
           </div>
         </div>
 
-        {/* ==== SUMMARY CARDS ==== */}
+        {summary && (
+          <section className="mb-10">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
+              <div>
+                <h3 className="text-xl font-bold text-text-primary">
+                  Analytics Highlights
+                </h3>
+                <p className="text-sm text-text-muted">
+                  Real-time metrics based on your latest logs.
+                </p>
+              </div>
+              <div className="inline-flex items-center gap-2 text-xs font-semibold text-text-secondary bg-surface/70 border border-border/60 px-3 py-1.5 rounded-full">
+                <Sparkles className="w-4 h-4 text-brand-primary" />
+                Live update
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
+              {[
+                {
+                  title: "Stress Logs",
+                  value: summary.stressLogsCount ?? 0,
+                  icon: Activity,
+                  gradient:
+                    "from-brand-primary/15 via-brand-primary/5 to-transparent",
+                  accent: "text-brand-primary",
+                },
+                {
+                  title: "Diary Entries",
+                  value: summary.diaryCount ?? 0,
+                  icon: BookOpen,
+                  gradient:
+                    "from-brand-info/15 via-brand-info/5 to-transparent",
+                  accent: "text-brand-info",
+                },
+                {
+                  title: "Current Streak",
+                  value: streakValue,
+                  icon: Flame,
+                  gradient:
+                    "from-brand-accent/20 via-brand-accent/5 to-transparent",
+                  accent: "text-brand-accent",
+                },
+              ].map((item, i) => {
+                const Icon = item.icon;
+                return (
+                  <div
+                    key={i}
+                    className="relative overflow-hidden rounded-2xl p-6 border backdrop-blur-xl text-center md:text-left"
+                    style={{
+                      background: "rgb(var(--glass-bg) / 0.7)",
+                      borderColor: "rgb(var(--glass-border) / 0.5)",
+                      boxShadow: "0 10px 28px rgba(0,0,0,0.08)",
+                    }}
+                  >
+                    <div
+                      className={`absolute inset-0 bg-gradient-to-br ${item.gradient}`}
+                    />
+                    <div className="relative z-10 flex flex-col gap-3">
+                      <div
+                        className={`w-10 h-10 rounded-xl bg-surface-elevated/80 glass-panel flex items-center justify-center ${item.accent}`}
+                      >
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-semibold uppercase tracking-[0.2em] text-text-muted">
+                          {item.title}
+                        </h4>
+                        <p className="text-3xl md:text-4xl font-bold text-text-primary mt-2">
+                          {item.value}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* ==== INSIGHTS ==== */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
           {[
-            { title: "Most Common Stress", value: getStressLabel(modeStress) },
+            {
+              title: "Most Common Stress",
+              value: getStressLabel(modeStress),
+              icon: TrendingUp,
+            },
             {
               title: "Most Common Mood",
               value: modeMood ? moodEmojis[modeMood - 1] : "-",
+              icon: Sparkles,
             },
-            { title: "Average Stress Level", value: getStressLabel(avgStress) },
-          ].map((item, i) => (
-            <div
-              key={i}
-              className="rounded-2xl p-6 border backdrop-blur-xl flex flex-col items-center md:items-start text-center md:text-left"
-              style={{
-                background: "rgba(255,255,255,0.45)",
-                borderColor: "var(--glass-border)",
-                boxShadow: "0 8px 25px rgba(0,0,0,0.06)",
-              }}
-            >
-              <h3
-                className="text-sm md:text-md font-medium mb-2 uppercase tracking-wide opacity-80"
-                style={{ color: "var(--brand-blue)" }}
+            {
+              title: "Average Stress Level",
+              value: getStressLabel(avgStress),
+              icon: BarChart3,
+            },
+          ].map((item, i) => {
+            const Icon = item.icon;
+            return (
+              <div
+                key={i}
+                className="rounded-2xl p-6 border backdrop-blur-xl flex flex-col items-center md:items-start text-center md:text-left"
+                style={{
+                  background: "rgb(var(--glass-bg) / 0.7)",
+                  borderColor: "rgb(var(--glass-border) / 0.5)",
+                  boxShadow: "0 8px 25px rgba(0,0,0,0.06)",
+                }}
               >
-                {item.title}
-              </h3>
-              {loading ? (
-                <div className="w-full space-y-2">
-                  <div className="skeleton h-10 w-28 rounded-full" />
-                  <div className="skeleton h-3 w-24 rounded-full" />
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-text-muted">
+                  <Icon className="w-4 h-4 text-brand-primary" />
+                  {item.title}
                 </div>
-              ) : (
-                <p className="text-3xl md:text-4xl font-bold text-[var(--text-primary)]">
-                  {item.value}
-                </p>
-              )}
-            </div>
-          ))}
+                {loading ? (
+                  <div className="w-full space-y-2 mt-3">
+                    <div className="skeleton h-10 w-28 rounded-full" />
+                    <div className="skeleton h-3 w-24 rounded-full" />
+                  </div>
+                ) : (
+                  <p className="text-3xl md:text-4xl font-bold text-text-primary mt-4">
+                    {item.value}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 

@@ -1,15 +1,26 @@
-const API_URL = "https://mfv81z.h.filess.io/api";
+import client from "./client";
+import { apiResponseSchema, parseApiResponse } from "./contracts/apiResponse";
+import {
+  motivationListSchema,
+  motivationResponseSchema,
+} from "./contracts/motivationSchemas";
+import { z } from "zod";
+
+const motivationListResponseSchema = apiResponseSchema(motivationListSchema);
+const motivationResponseApiSchema = apiResponseSchema(motivationResponseSchema);
+const emptyResponseSchema = apiResponseSchema(z.null());
 
 export async function getAllMotivations() {
-  const res = await fetch(`${API_URL}/motivations`);
-  return res.json();
+  const response = await client.get("/motivations/");
+  return parseApiResponse(motivationListResponseSchema, response.data);
 }
 
 export async function createMotivation(data) {
-  const res = await fetch(`${API_URL}/motivations`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  return res.json();
+  const response = await client.post("/motivations/", data);
+  return parseApiResponse(motivationResponseApiSchema, response.data);
+}
+
+export async function deleteMotivation(motivationId) {
+  const response = await client.delete(`/motivations/${motivationId}`);
+  return parseApiResponse(emptyResponseSchema, response.data);
 }

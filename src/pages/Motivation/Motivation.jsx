@@ -2,7 +2,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useOutletContext } from "react-router-dom";
 import html2canvas from "html2canvas";
-import axios from "axios"; // TAMBAHAN: Import Axios
+import {
+  addBookmark,
+  deleteBookmark,
+  getMyBookmarks,
+} from "../../services/bookmarkService";
 import {
   RefreshCw,
   Bookmark,
@@ -14,22 +18,29 @@ import {
 } from "lucide-react";
 import Navbar from "../../components/Navbar";
 import Footer from "../../components/Footer";
+import PageMeta from "../../components/PageMeta";
 import Logo from "../../assets/images/Logo-Nostressia.png";
-import { BASE_URL } from "../../api/config";
+import { getMotivations } from "../../services/motivationService";
+import { readAuthToken } from "../../utils/auth";
+import { createLogger } from "../../utils/logger";
+
+const logger = createLogger("MOTIVATION");
 
 // --- COLOR CONFIGURATION (MATCHING DASHBOARD) ---
-const BG_CREAM = "#FFF3E0";
-const BG_PINK = "#eaf2ff";
-const BG_LAVENDER = "#e3edff";
+const BG_SUN = "rgb(var(--bg-gradient-sun))";
+const BG_ORANGE = "rgb(var(--bg-gradient-orange))";
+const BG_SKY = "rgb(var(--bg-gradient-sky))";
+const BG_OCEAN = "rgb(var(--bg-gradient-ocean))";
+const BG_INK = "rgb(var(--bg-gradient-ink))";
 
-// Style Background dengan Animasi
+// Background style with animation
 const backgroundStyle = {
   minHeight: "100vh",
-  backgroundColor: BG_CREAM,
+  backgroundColor: BG_SUN,
   backgroundImage: `
-    radial-gradient(at 10% 10%, ${BG_CREAM} 0%, transparent 50%),
-    radial-gradient(at 90% 20%, ${BG_PINK} 0%, transparent 50%),
-    radial-gradient(at 50% 80%, ${BG_LAVENDER} 0%, transparent 50%)
+    radial-gradient(at 10% 10%, ${BG_SUN} 0%, transparent 50%),
+    radial-gradient(at 90% 20%, ${BG_ORANGE} 0%, transparent 50%),
+    radial-gradient(at 50% 80%, ${BG_SKY} 0%, transparent 50%)
   `,
   backgroundSize: "200% 200%",
   animation: "gradient-bg 20s ease infinite",
@@ -37,51 +48,19 @@ const backgroundStyle = {
 
 const HERO_INDEX = "hero";
 
-const heroQuoteList = [
-  {
-    text: "Every day is a new opportunity to improve yourself.",
-    category: "Self-Development",
-  },
-  {
-    text: "Small steps today can lead to big changes tomorrow.",
-    category: "Progress",
-  },
-  {
-    text: "Focus on the process, not the result — results will follow.",
-    category: "Mindset",
-  },
-  {
-    text: "Motivation starts you, but discipline keeps you going.",
-    category: "Discipline",
-  },
-  {
-    text: "Life isn't about waiting for the storm to pass — learn to dance in the rain.",
-    category: "Resilience",
-  },
-  {
-    text: "If you want change, start with yourself.",
-    category: "Transformation",
-  },
-  {
-    text: "Don't compare your journey to others. Walk your own path.",
-    category: "Confidence",
-  },
-  { text: "When you're tired, rest — don't quit.", category: "Sustainability" },
-  { text: "Miracles happen when you refuse to give up.", category: "Hope" },
-  {
-    text: "Small consistent actions every day beat occasional bursts of motivation.",
-    category: "Consistency",
-  },
-];
-
 const TEMPLATES = [
-  { id: "pastel-cream", name: "Cream", color: BG_CREAM },
-  { id: "pastel-pink", name: "Pink", color: BG_PINK },
-  { id: "pastel-lavender", name: "Lavender", color: BG_LAVENDER },
+  { id: "sun", name: "Sun", color: BG_SUN },
+  { id: "orange", name: "Orange", color: BG_ORANGE },
+  { id: "sky", name: "Sky", color: BG_SKY },
   {
-    id: "pastel-gradient",
-    name: "Peach",
-    color: "linear-gradient(135deg,#FFE2D1,#FFD1C8)",
+    id: "ocean",
+    name: "Ocean",
+    color: `linear-gradient(135deg, ${BG_OCEAN}, ${BG_SKY})`,
+  },
+  {
+    id: "ink",
+    name: "Ink",
+    color: `linear-gradient(135deg, ${BG_INK}, ${BG_OCEAN})`,
   },
 ];
 
@@ -90,9 +69,9 @@ const EXPORT_SIZES = [{ id: "original", name: "Original", w: 464, h: 264 }];
 export default function Motivation() {
   const [likedIndex, setLikedIndex] = useState([]);
   const [toastMessage, setToastMessage] = useState("");
-  
-  // 3. AMBIL DATA USER DARI WRAPPER (MAINLAYOUT)
-  const { user } = useOutletContext() || { user: {} }; 
+
+  // Fetch the user context from MainLayout.
+  const { user } = useOutletContext() || { user: {} };
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -105,10 +84,11 @@ export default function Motivation() {
   const [visibleCount, setVisibleCount] = useState(6);
   const ITEMS_PER_PAGE = 6;
 
-  // MODIFIKASI: Hero Quote harus punya ID null agar konsisten
-  const [heroQuote, setHeroQuote] = useState(() => {
-    const i = Math.floor(Math.random() * heroQuoteList.length);
-    return { text: heroQuoteList[i].text, motivationID: null };
+  // Ensure the hero quote keeps a null ID for consistency.
+  const [heroQuote, setHeroQuote] = useState({
+    text: "",
+    motivationId: null,
+    authorName: "",
   });
 
   const [shareOpen, setShareOpen] = useState(false);
@@ -122,21 +102,18 @@ export default function Motivation() {
   const prevBodyOverflow = useRef(null);
   const initialScrollResetDone = useRef(false);
 
-  // --- TAMBAHAN: FETCH DATA BOOKMARK DARI API SAAT LOAD ---
+  // --- Fetch bookmarks from the API on load ---
   useEffect(() => {
     const fetchBookmarks = async () => {
-        const token = localStorage.getItem("token");
-        if (!token) return;
-        try {
-            const res = await axios.get(`${BASE_URL}/bookmarks/me`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            // Simpan ID yang sudah di-bookmark
-            const ids = res.data.map(item => item.motivationID);
-            setLikedIndex(ids);
-        } catch (e) {
-            console.error("Bookmark sync error:", e);
-        }
+      const token = readAuthToken();
+      if (!token) return;
+      try {
+        const data = await getMyBookmarks();
+        const ids = (data || []).map((item) => item.motivationId);
+        setLikedIndex(ids);
+      } catch (e) {
+        logger.error("Bookmark sync error:", e);
+      }
     };
     fetchBookmarks();
   }, []);
@@ -147,7 +124,7 @@ export default function Motivation() {
       try {
         window.history.scrollRestoration = "manual";
       } catch (error) {
-        console.warn("Scroll restoration update failed", error);
+        logger.warn("Scroll restoration update failed", error);
       }
     }
     if (!initialScrollResetDone.current) {
@@ -166,7 +143,7 @@ export default function Motivation() {
           }
         });
       },
-      { threshold: 0.18 }
+      { threshold: 0.18 },
     );
 
     if (headerRef.current) io.observe(headerRef.current);
@@ -182,17 +159,13 @@ export default function Motivation() {
       setLoading(true);
       setError("");
       try {
-        const cleanBaseUrl = BASE_URL.replace(/\/$/, "");
-        const res = await fetch(`${cleanBaseUrl}/motivations`);
-
-        if (!res.ok) throw new Error(`API error ${res.status}`);
-        const data = await res.json();
+        const data = await getMotivations();
 
         if (!mounted) return;
 
         const normalized = data.map((d) => ({
-          motivationID: d.motivationID ?? d.id ?? d.motivation_id ?? null,
-          quote: d.quote ?? d.quotes ?? d.text ?? "",
+          motivationId: d.motivationId ?? null,
+          quote: d.quote ?? "",
           authorName: d.authorName ?? "Anonymous",
         }));
 
@@ -201,12 +174,18 @@ export default function Motivation() {
         if (normalized.length > 0) {
           setHeroQuote({
             text: normalized[0].quote,
-            motivationID: normalized[0].motivationID,
+            motivationId: normalized[0].motivationId,
             authorName: normalized[0].authorName,
+          });
+        } else {
+          setHeroQuote({
+            text: "",
+            motivationId: null,
+            authorName: "",
           });
         }
       } catch (err) {
-        console.error("Failed fetching motivations:", err);
+        logger.error("Failed fetching motivations:", err);
         setError("Failed to load motivations. Using local data.");
       } finally {
         if (mounted) setLoading(false);
@@ -220,21 +199,21 @@ export default function Motivation() {
 
   const fallbackMotivationalQuotes = [
     {
-      motivationID: "f-1",
+      motivationId: "f-1",
       quote: "Success starts with small consistent steps every day.",
       category: "Productivity",
       icon: <TrendingUp className="w-4 h-4" />,
       authorName: "Anonymous",
     },
     {
-      motivationID: "f-2",
+      motivationId: "f-2",
       quote: "Don't fear failure — fear never trying.",
       category: "Courage",
       icon: <Star className="w-4 h-4" />,
       authorName: "Anonymous",
     },
     {
-      motivationID: "f-3",
+      motivationId: "f-3",
       quote: "Every expert was once a beginner. Keep learning.",
       category: "Learning",
       icon: <Sparkles className="w-4 h-4" />,
@@ -242,46 +221,44 @@ export default function Motivation() {
     },
   ];
 
-  // --- MODIFIKASI: FUNGSI TOGGLE LIKE TERHUBUNG API ---
+  // --- Toggle like hook wired to the API ---
   const toggleLike = async (id) => {
-    const token = localStorage.getItem("token");
+    const token = readAuthToken();
     if (!token) {
-        showToast("Please login first! 🔒");
-        return;
+      showToast("Please login first! 🔒");
+      return;
     }
-    
-    // Jangan proses bookmark untuk Hero Quote yang belum punya ID (statis)
+
+    // Skip bookmarks for the static hero quote that does not have an ID yet.
     if (!id || id === HERO_INDEX) {
-        showToast("Cannot bookmark this yet.");
-        return;
+      showToast("Cannot bookmark this yet.");
+      return;
     }
 
     const isLiked = likedIndex.includes(id);
 
     // Optimistic Update (Update UI dulu)
     setLikedIndex((prev) =>
-      isLiked ? prev.filter((i) => i !== id) : [...prev, id]
+      isLiked ? prev.filter((i) => i !== id) : [...prev, id],
     );
 
     try {
-        if (isLiked) {
-            // Hapus Bookmark
-            await axios.delete(`${BASE_URL}/bookmarks/${id}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            showToast("Bookmark removed 🗑️");
-        } else {
-            // Tambah Bookmark
-            await axios.post(`${BASE_URL}/bookmarks/${id}`, {}, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            showToast("Saved to profile ❤️");
-        }
+      if (isLiked) {
+        // Remove the bookmark.
+        await deleteBookmark(id);
+        showToast("Bookmark removed 🗑️");
+      } else {
+        // Add bookmark
+        await addBookmark(id);
+        showToast("Saved to profile ❤️");
+      }
     } catch (err) {
-        console.error("Bookmark API Error:", err);
-        showToast("Failed to bookmark.");
-        // Rollback state jika gagal
-        setLikedIndex((prev) => isLiked ? [...prev, id] : prev.filter((i) => i !== id));
+      logger.error("Bookmark API Error:", err);
+      showToast("Failed to bookmark.");
+      // Roll back local state if the API request fails.
+      setLikedIndex((prev) =>
+        isLiked ? [...prev, id] : prev.filter((i) => i !== id),
+      );
     }
   };
   // ----------------------------------------------------
@@ -292,13 +269,11 @@ export default function Motivation() {
       const m = motivations[randomIndex];
       return {
         text: m.quote,
-        motivationID: m.motivationID,
+        motivationId: m.motivationId,
         authorName: m.authorName,
       };
-    } else {
-      const randomIndex = Math.floor(Math.random() * heroQuoteList.length);
-      return { text: heroQuoteList[randomIndex].text, motivationID: null };
     }
+    return { text: "", motivationId: null, authorName: "" };
   };
 
   const openShare = (text) => {
@@ -312,6 +287,8 @@ export default function Motivation() {
     setShareOpen(false);
     document.body.style.overflow = prevBodyOverflow.current || "";
   };
+
+  const hasHeroQuote = Boolean(heroQuote.text);
 
   const downloadShareCard = async () => {
     if (!shareCardRef.current) return;
@@ -346,7 +323,7 @@ export default function Motivation() {
 
       showToast("Download complete 🎉");
     } catch (err) {
-      console.error("Download failed:", err);
+      logger.error("Download failed:", err);
       showToast("Download failed.");
     }
   };
@@ -365,7 +342,7 @@ export default function Motivation() {
         style={{
           background: templateBg,
           borderRadius: 16,
-          boxShadow: "0 10px 28px rgba(0,0,0,0.08)",
+          boxShadow: "0 14px 32px rgba(0,0,0,0.16)",
           position: "relative",
         }}
       >
@@ -373,11 +350,13 @@ export default function Motivation() {
           style={{
             width: "82%",
             maxWidth: 900,
-            background: "#fff",
+            background: "rgb(var(--surface-elevated) / 0.82)",
+            border: "1px solid rgb(var(--glass-border) / 0.7)",
+            backdropFilter: "blur(12px)",
             padding: 20,
             borderRadius: 12,
             textAlign: "center",
-            boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
+            boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
             zIndex: 2,
           }}
         >
@@ -401,16 +380,24 @@ export default function Motivation() {
               }}
             />
             <div style={{ textAlign: "left" }}>
-              <div style={{ fontSize: 13, color: "#ff7a59", fontWeight: 700 }}>
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "rgb(var(--brand-primary))",
+                  fontWeight: 700,
+                }}
+              >
                 Motivation
               </div>
-              <div style={{ fontSize: 11, color: "#7b7b7b" }}>Share Card</div>
+              <div style={{ fontSize: 11, color: "rgb(var(--text-muted))" }}>
+                Share Card
+              </div>
             </div>
           </div>
           <p
             style={{
               fontSize: 18,
-              color: "#333",
+              color: "rgb(var(--text-primary))",
               fontStyle: "italic",
               margin: "6px 0 12px",
             }}
@@ -422,7 +409,7 @@ export default function Motivation() {
               display: "flex",
               justifyContent: "space-between",
               fontSize: 12,
-              color: "#777",
+              color: "rgb(var(--text-muted))",
               marginTop: 8,
             }}
           >
@@ -448,16 +435,20 @@ export default function Motivation() {
   return (
     // Tambahkan flex-col agar footer turun ke bawah
     <div style={backgroundStyle} className="min-h-screen flex flex-col">
+      <PageMeta
+        title="Motivation"
+        description="Get daily motivational quotes and save your favorites to stay inspired."
+      />
       <style>{`
         @keyframes gradient-bg { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
       `}</style>
 
       {toastMessage && (
-        <div className="fixed top-6 right-6 z-[9999] bg-orange-500 text-white px-4 py-2 rounded-xl shadow-lg">
+        <div className="fixed top-6 right-6 z-[9999] bg-brand-accent/90 text-text-inverse glass-panel px-4 py-2 rounded-xl shadow-lg">
           {toastMessage}
         </div>
       )}
-      
+
       {/* 4. PASS USER KE NAVBAR */}
       <Navbar activeLink="Motivation" user={user} />
 
@@ -472,7 +463,7 @@ export default function Motivation() {
                 Motivation Hub
               </h1>
             </div>
-            <p className="text-gray-600 mt-2 text-base md:text-lg font-medium">
+            <p className="text-text-secondary mt-2 text-base md:text-lg font-medium dark:text-text-muted">
               Find inspiration and a boost to make your day more productive
             </p>
           </div>
@@ -483,52 +474,59 @@ export default function Motivation() {
           ref={heroRef}
           className="opacity-0 translate-y-6 mt-6 md:mt-8 rounded-2xl p-6 md:p-10 relative overflow-hidden"
           style={{
-            background: "rgba(255,255,255,0.25)",
-            border: "1px solid rgba(255,255,255,0.3)",
+            background: "rgb(var(--glass-bg) / 0.7)",
+            border: "1px solid rgb(var(--glass-border) / 0.5)",
             backdropFilter: "blur(10px)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.06)",
+            boxShadow: "0 8px 32px rgb(var(--shadow-color) / 0.12)",
           }}
         >
           <div className="relative z-10">
-            <div className="inline-flex rounded-full bg-white border text-orange-700 text-sm font-medium shadow-sm px-3 py-1 mb-4 cursor-default">
+            <div className="inline-flex rounded-full bg-surface-elevated glass-panel border text-orange-700 text-sm font-medium shadow-sm px-3 py-1 mb-4 cursor-default dark:bg-surface dark:border-border dark:text-orange-600">
               ✨ Today's Quote
             </div>
-            <h2 className="text-2xl md:text-3xl font-bold mb-3 text-gray-800">
+            <h2 className="text-2xl md:text-3xl font-bold mb-3 text-text-primary dark:text-text-primary">
               Featured Motivation
             </h2>
-            <p className="text-lg md:text-xl italic text-gray-700 max-w-3xl">
-              "{heroQuote.text}"
+            <p className="text-lg md:text-xl italic text-text-secondary max-w-3xl dark:text-text-primary">
+              {hasHeroQuote
+                ? `"${heroQuote.text}"`
+                : "No motivations available yet."}
             </p>
             <div className="flex gap-3 mt-6 flex-wrap justify-end">
               <button
                 onClick={() => setHeroQuote(getRandomHeroQuote())}
-                className="px-4 py-2 rounded-lg bg-gradient-to-r from-orange-500 to-orange-600 text-white font-medium flex items-center gap-2 shadow hover:scale-105 transition cursor-pointer"
+                disabled={!hasHeroQuote}
+                className="px-4 py-2 rounded-lg bg-gradient-to-r from-orange-500 to-orange-600 text-white font-medium flex items-center gap-2 shadow hover:scale-105 transition disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <RefreshCw className="w-4 h-4" />
                 New Quote
               </button>
-              
-              {/* MODIFIKASI: Passing ID yang benar ke toggleLike */}
+
+              {/* Pass the correct ID to toggleLike */}
               <button
-                onClick={() => toggleLike(heroQuote.motivationID)}
-                className="px-4 py-2 rounded-lg bg-white border font-medium flex items-center gap-2 shadow hover:scale-105 transition cursor-pointer"
+                onClick={() => toggleLike(heroQuote.motivationId)}
+                disabled={!hasHeroQuote}
+                className="px-4 py-2 rounded-lg bg-surface-elevated glass-panel border font-medium flex items-center gap-2 shadow hover:scale-105 transition disabled:opacity-60 disabled:cursor-not-allowed dark:bg-surface dark:border-border dark:text-text-primary"
                 aria-label="bookmark-hero"
               >
                 <Bookmark
                   className={`w-4 h-4 ${
-                    likedIndex.includes(heroQuote.motivationID)
+                    likedIndex.includes(heroQuote.motivationId)
                       ? "fill-orange-500 text-orange-600"
-                      : "text-gray-500"
+                      : "text-text-muted"
                   }`}
                 />
                 <span className="hidden sm:inline">
-                  {likedIndex.includes(heroQuote.motivationID) ? "Saved" : "Save"}
+                  {likedIndex.includes(heroQuote.motivationId)
+                    ? "Saved"
+                    : "Save"}
                 </span>
               </button>
 
               <button
                 onClick={() => openShare(heroQuote.text)}
-                className="px-4 py-2 rounded-lg bg-white border flex items-center gap-2 text-gray-700 shadow hover:scale-105 transition cursor-pointer"
+                disabled={!hasHeroQuote}
+                className="px-4 py-2 rounded-lg bg-surface-elevated glass-panel border flex items-center gap-2 text-text-secondary shadow hover:scale-105 transition disabled:opacity-60 disabled:cursor-not-allowed dark:bg-surface dark:border-border dark:text-text-primary"
               >
                 <Share2 className="w-4 h-4" />
                 <span className="hidden sm:inline">Share</span>
@@ -539,44 +537,43 @@ export default function Motivation() {
 
         {/* Collection */}
         <div className="mt-8 md:mt-10 mb-6 flex items-center justify-between">
-          <h3 className="text-xl md:text-2xl font-bold text-gray-800 flex items-center gap-3">
+          <h3 className="text-xl md:text-2xl font-bold text-text-primary flex items-center gap-3 dark:text-text-primary">
             <Star className="w-5 h-5 text-yellow-500" />
             Motivation Collection
           </h3>
-          <p className="text-gray-600 text-sm">
+          <p className="text-text-secondary text-sm dark:text-text-muted">
             {loading
               ? "Loading..."
               : error
-              ? error
-              : "Inspiration for every moment"}
+                ? error
+                : "Inspiration for every moment"}
           </p>
         </div>
 
         {/* Cards grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
           {currentItems.map((quoteObj, idx) => {
-            const id = quoteObj.motivationID ?? `fallback-${idx}`;
+            const id = quoteObj.motivationId ?? `fallback-${idx}`;
             return (
               <div
                 key={id}
                 ref={(el) => (cardsRef.current[idx] = el)}
                 className="opacity-0 translate-y-6 rounded-2xl p-5 md:p-6 relative transition-all hover:scale-105 hover:shadow-xl"
                 style={{
-                  background: "rgba(255,255,255,0.25)",
-                  border: "1px solid rgba(255,255,255,0.3)",
+                  background: "rgb(var(--glass-bg) / 0.7)",
+                  border: "1px solid rgb(var(--glass-border) / 0.5)",
                   backdropFilter: "blur(10px)",
-                  boxShadow: "0 4px 18px rgba(0,0,0,0.04)",
+                  boxShadow: "0 4px 18px rgb(var(--shadow-color) / 0.1)",
                 }}
               >
-                <p className="text-md md:text-lg italic text-gray-700 min-h-[72px] md:min-h-[90px]">
+                <p className="text-md md:text-lg italic text-text-secondary min-h-[72px] md:min-h-[90px] dark:text-text-primary">
                   "{quoteObj.quote}"
                 </p>
-                <div className="text-xs text-gray-500 mt-2">
+                <div className="text-xs text-text-muted mt-2 dark:text-text-muted">
                   Author: {quoteObj.authorName ?? "-"}
                 </div>
-                <div className="mt-4 pt-4 border-t border-black/5 flex justify-end gap-3 items-center">
-                  
-                  {/* MODIFIKASI: Tombol Bookmark pada List */}
+                <div className="mt-4 pt-4 border-t border-border/60 flex justify-end gap-3 items-center">
+                  {/* Bookmark button for list items */}
                   <button
                     onClick={() => toggleLike(id)}
                     aria-label={`bookmark-${id}`}
@@ -586,14 +583,14 @@ export default function Motivation() {
                       className={`w-6 h-6 ${
                         likedIndex.includes(id)
                           ? "fill-orange-500 text-orange-600"
-                          : "text-gray-400 hover:text-orange-400"
+                          : "text-text-muted hover:text-orange-400"
                       }`}
                     />
                   </button>
 
                   <button
                     onClick={() => openShare(quoteObj.quote)}
-                    className="text-xs sm:text-sm text-orange-500 hover:text-orange-600 font-medium flex items-center gap-1 cursor-pointer"
+                    className="text-xs sm:text-sm text-brand-primary hover:text-brand-primary/80 font-medium flex items-center gap-1 cursor-pointer"
                     aria-label={`share-${id}`}
                   >
                     <Share2 className="w-4 h-4" />{" "}
@@ -626,7 +623,7 @@ export default function Motivation() {
           aria-modal="true"
         >
           <div
-            className="absolute inset-0 bg-black/30 backdrop-blur-sm transition-opacity"
+            className="absolute inset-0 bg-neutral-950/30 backdrop-blur-sm transition-opacity"
             onClick={closeShare}
           />
           <div
@@ -637,7 +634,7 @@ export default function Motivation() {
               <div className="flex justify-end mb-2">
                 <button
                   onClick={closeShare}
-                  className="px-3 py-1 rounded-md bg-white/30 backdrop-blur text-sm cursor-pointer"
+                  className="px-3 py-1 rounded-md bg-surface-elevated/30 glass-chip text-sm cursor-pointer"
                 >
                   Close
                 </button>
@@ -651,7 +648,7 @@ export default function Motivation() {
                   <div className="transform scale-[0.75] sm:scale-[0.9] md:scale-100 transition-transform origin-center">
                     <div
                       ref={shareCardRef}
-                      // UBAHAN: Hardcode width/height to match EXPORT_SIZES (464x264)
+                      // Match width/height to EXPORT_SIZES (464x264).
                       style={{
                         width: "464px",
                         height: "264px",
@@ -675,10 +672,10 @@ export default function Motivation() {
                 </div>
 
                 {/* Bagian Kanan (Controls) */}
-                {/* UBAHANNYA: w-full di mobile, fixed width di desktop */}
+                {/* Use full width on mobile and fixed width on desktop */}
                 <div className="w-full md:w-[360px] space-y-4">
                   <div>
-                    <h4 className="font-semibold mb-2 text-white md:text-gray-800">
+                    <h4 className="font-semibold mb-2 text-text-primary">
                       Choose template
                     </h4>
                     <div className="grid grid-cols-2 gap-3">
@@ -688,14 +685,14 @@ export default function Motivation() {
                           onClick={() => setSelectedTemplate(t.id)}
                           className={`p-2 rounded-lg border ${
                             selectedTemplate === t.id
-                              ? "ring-2 ring-orange-400"
-                              : "border-black/5"
+                              ? "ring-2 ring-brand-primary"
+                              : "border-border"
                           } cursor-pointer`}
                           style={{ background: t.color }}
                         >
                           <div
                             style={{
-                              background: "#fff",
+                              background: "rgb(var(--surface-elevated) / 0.85)",
                               padding: 6,
                               borderRadius: 8,
                             }}
@@ -704,7 +701,7 @@ export default function Motivation() {
                               style={{
                                 fontSize: 12,
                                 fontWeight: 700,
-                                color: "#ff7a59",
+                                color: "rgb(var(--brand-primary))",
                               }}
                             >
                               {t.name}
@@ -717,17 +714,17 @@ export default function Motivation() {
                   <div className="mt-4 flex flex-col gap-3">
                     <button
                       onClick={downloadShareCard}
-                      className="px-4 py-3 bg-orange-500 text-white rounded-xl cursor-pointer shadow"
+                      className="px-4 py-3 bg-brand-primary text-text-inverse rounded-xl cursor-pointer shadow"
                     >
                       Download PNG
                     </button>
                     <button
                       onClick={copyText}
-                      className="px-4 py-3 bg-white border rounded-xl cursor-pointer"
+                      className="px-4 py-3 bg-surface-elevated glass-panel border rounded-xl cursor-pointer"
                     >
                       Copy Text
                     </button>
-                    <div className="text-xs text-black mt-2">
+                    <div className="text-xs text-text-primary mt-2">
                       Tip: center white card keeps text readable while outer
                       background
                     </div>
@@ -743,7 +740,8 @@ export default function Motivation() {
         .animate-slide-up {
           opacity: 1 !important;
           transform: translateY(0) !important;
-          transition: transform 900ms cubic-bezier(0.16, 1, 0.3, 1),
+          transition:
+            transform 900ms cubic-bezier(0.16, 1, 0.3, 1),
             opacity 600ms ease;
         }
         .translate-y-6 {
@@ -764,7 +762,7 @@ export default function Motivation() {
           }
         }
       `}</style>
-      
+
       {/* 5. FOOTER */}
       <Footer />
     </div>

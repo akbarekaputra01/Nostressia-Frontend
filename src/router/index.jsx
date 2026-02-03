@@ -1,9 +1,10 @@
 // src/router/index.jsx
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { readAdminToken, readAuthToken } from "../utils/auth";
 
-// 1. IMPORT LAYOUT (Pastikan path-nya sesuai dengan lokasi file MainLayout Anda)
-import MainLayout from "../layouts/MainLayout"; 
+import MainLayout from "../layouts/MainLayout";
+import ScrollToTop from "../components/ScrollToTop";
 
 // Import User Pages
 import Dashboard from "../pages/Dashboard/Dashboard";
@@ -14,46 +15,67 @@ import Analytics from "../pages/Analytics/Analytics";
 import Profile from "../pages/Profile/Profile"; 
 import Login from "../pages/Login/Login"; 
 import LandingPage from "../pages/LandingPage/LandingPage";
+import NotFound from "../pages/NotFound/NotFound";
 
 // Import Admin Pages
 import AdminPage from "../pages/Admin/AdminPage";
 import AdminLogin from "../pages/Admin/AdminLogin";
 
-// Kode AdminRoute (Biarkan tetap seperti ini)
-const AdminRoute = () => {
-  const isAuthenticated = localStorage.getItem("adminAuth") === "true";
-  return isAuthenticated ? <Outlet /> : <Navigate to="/admin/login" replace />;
+// Require an admin session for nested routes.
+export const AdminProtectedRoute = () => {
+  const token = readAdminToken();
+  return token ? <Outlet /> : <Navigate to="/admin/login" replace />;
+};
+
+// Require a user session for nested routes.
+export const ProtectedRoute = () => {
+  const token = readAuthToken();
+  return token ? <Outlet /> : <Navigate to="/login" replace />;
+};
+
+// Redirect authenticated users away from public routes.
+export const PublicRoute = ({ redirectTo = "/dashboard" }) => {
+  const token = readAuthToken();
+  return token ? <Navigate to={redirectTo} replace /> : <Outlet />;
+};
+
+// Redirect authenticated admins away from public routes.
+export const AdminPublicRoute = ({ redirectTo = "/admin" }) => {
+  const token = readAdminToken();
+  return token ? <Navigate to={redirectTo} replace /> : <Outlet />;
 };
 
 function AppRouter() {
   return (
     <BrowserRouter>
+      <ScrollToTop />
       <Routes>
-        {/* --- 1. ROUTE PUBLIK (Tanpa Navbar User) --- */}
-        {/* Route redirect lama dihapus agar "/" tidak melempar ke login */}
-        <Route path="/login" element={<Login />} /> 
-
-        {/* --- 2. ROUTE USER (DILINDUNGI MAINLAYOUT) --- */}
-        {/* Semua halaman di dalam sini akan punya Navbar & Data User otomatis */}
-        <Route element={<MainLayout />}>
-            {/* Set Landing Page di path root "/" */}
-            <Route path="/" element={<LandingPage />} />
-            
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/tips" element={<Tips />} />
-            <Route path="/motivation" element={<Motivation />} />
-            <Route path="/diary" element={<Diary />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/profile" element={<Profile />} /> 
+        <Route path="/" element={<LandingPage />} />
+        <Route element={<PublicRoute />}>
+          <Route path="/login" element={<Login />} />
         </Route>
 
-        {/* --- 3. ROUTE ADMIN (Terpisah) --- */}
-        <Route path="/adm1n" element={<AdminPage skipAuth={true} />} /> 
-        <Route path="/admin/login" element={<AdminLogin />} /> 
+        <Route element={<ProtectedRoute />}>
+          <Route element={<MainLayout />}>
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/tips" element={<Tips />} />
+              <Route path="/motivation" element={<Motivation />} />
+              <Route path="/diary" element={<Diary />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/profile" element={<Profile />} /> 
+          </Route>
+        </Route>
 
-        <Route element={<AdminRoute />}>
+        <Route path="/adm1n" element={<AdminPage skipAuth={true} />} /> 
+        <Route element={<AdminPublicRoute />}>
+          <Route path="/admin/login" element={<AdminLogin />} /> 
+        </Route>
+
+        <Route element={<AdminProtectedRoute />}>
             <Route path="/admin" element={<AdminPage />} />
         </Route>
+
+        <Route path="*" element={<NotFound />} />
       
       </Routes>
     </BrowserRouter>

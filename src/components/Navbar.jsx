@@ -1,10 +1,12 @@
 // src/components/Navbar.jsx
 import React, { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
-import LogoImage from "../assets/images/Logo-Nostressia.png"; 
-import { resolveAvatarUrl } from "../utils/avatar";
+import LogoImage from "../assets/images/Logo-Nostressia.png";
+import { DEFAULT_AVATAR, resolveAvatarUrl } from "../utils/avatar";
+import { Flame } from "lucide-react";
+import { hasLoggedToday as resolveHasLoggedToday, resolveDisplayedStreak } from "../utils/streak";
 
-// --- Data Menu Navigasi ---
+// --- Navigation menu data ---
 const navLinks = [
   { name: "Dashboard", href: "/dashboard" },
   { name: "Analytics", href: "/analytics" },
@@ -13,11 +15,11 @@ const navLinks = [
   { name: "Diary", href: "/diary" },
 ];
 
-// --- TERIMA PROPS 'user' DI SINI ---
+// --- Receive the 'user' prop here ---
 const Navbar = ({ user }) => {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  
+
   const navbarRef = useRef(null);
   const isActive = (path) => location.pathname === path;
 
@@ -33,8 +35,40 @@ const Navbar = ({ user }) => {
     };
   }, []);
 
-  const fallbackAvatar = "https://i.pravatar.cc/40?img=12";
+  const fallbackAvatar = DEFAULT_AVATAR;
   const avatarSrc = resolveAvatarUrl(user?.avatar) || fallbackAvatar;
+
+  // --- Flame color logic based on the current streak ---
+  const getFlameColor = (streakCount, hasLoggedToday) => {
+    const count = streakCount || 0;
+
+    // If the user has not logged today or streak is <= 0, keep the flame muted.
+    if (!hasLoggedToday || count <= 0) {
+      return "text-text-muted fill-text-muted/40";
+    }
+
+    // >=60 -> info
+    if (count >= 60) {
+      return "text-brand-info fill-brand-info/30";
+    }
+
+    // >=7 -> warning
+    if (count >= 7) {
+      return "text-brand-warning fill-brand-warning/30";
+    }
+
+    // >=1 -> accent
+    if (count >= 1) {
+      return "text-brand-accent fill-brand-accent/30";
+    }
+
+    return "text-text-muted fill-text-muted/40";
+  };
+
+  const streakVal = user?.streak || 0;
+  const hasLoggedToday = resolveHasLoggedToday();
+  const displayStreak = resolveDisplayedStreak(streakVal);
+  const flameClass = getFlameColor(displayStreak, hasLoggedToday);
 
   return (
     <header
@@ -45,10 +79,12 @@ const Navbar = ({ user }) => {
                 z-50 w-[calc(100%-32px)] md:w-[calc(100%-48px)]
                 flex flex-wrap justify-between items-center 
                 rounded-[20px] 
-                bg-white/60 backdrop-blur-md 
-                border border-white/20 
+                bg-surface/70 backdrop-blur-md 
+                border border-border/50 
                 shadow-xl 
                 transition-all duration-300 
+                dark:bg-surface/80 dark:border-border/60
+            glass-panel
             "
     >
       <div className="flex justify-between items-center w-full">
@@ -71,10 +107,11 @@ const Navbar = ({ user }) => {
                     to={link.href}
                     className="
                                 group relative 
-                                text-gray-600 font-semibold text-[0.95rem]
+                                text-text-secondary font-semibold text-[0.95rem]
                                 py-2 px-1 
                                 transition-all duration-200 
-                                hover:text-gray-900
+                                hover:text-text-primary
+                                dark:text-text-secondary dark:hover:text-text-primary
                             "
                   >
                     {link.name}
@@ -84,8 +121,8 @@ const Navbar = ({ user }) => {
                                         transition-all duration-300 
                                         ${
                                           isActive(link.href)
-                                            ? "w-full bg-[#3664BA]"
-                                            : "w-0 bg-transparent group-hover:w-full group-hover:bg-gray-500"
+                                            ? "w-full bg-brand-primary"
+                                            : "w-0 bg-transparent group-hover:w-full group-hover:bg-text-muted"
                                         }
                                     `}
                     ></span>
@@ -96,37 +133,80 @@ const Navbar = ({ user }) => {
           </nav>
         </div>
 
-        {/* KANAN: NOTIF & PROFIL */}
+        {/* Right: Streak & profile */}
         <div className="flex items-center gap-2 md:gap-4">
-          <button className="relative p-2 rounded-xl text-gray-600 hover:bg-black/5 transition-all cursor-pointer">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
-              <path fillRule="evenodd" d="M5.25 9a6.75 6.75 0 0113.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 01-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 11-7.48 0 24.585 24.585 0 01-4.831-1.244.75.75 0 01-.298-1.205A8.217 8.217 0 005.25 9.75V9zm4.502 8.9a2.25 2.25 0 104.496 0 25.057 25.057 0 01-4.496 0z" clipRule="evenodd" />
-            </svg>
-            <span className="absolute top-1.5 right-2 w-2 h-2 bg-red-600 border-2 border-white/40 rounded-full"></span>
-          </button>
+          {/* Streak pill with API-driven color */}
+          <Link
+            to="/profile"
+            className="
+              flex items-center gap-2 
+              px-3 py-1.5 md:px-4 md:py-2 
+              text-text-secondary font-semibold text-xs md:text-sm 
+              rounded-full 
+              border border-border/70
+              hover:bg-surface-muted hover:border-border
+              transition-all duration-300
+              cursor-pointer
+              dark:text-text-secondary dark:border-border/70 dark:hover:bg-surface-muted dark:hover:border-border
+            "
+            title={`Current Streak: ${displayStreak} days`}
+          >
+            {/* The flame icon changes color based on the logic above */}
+            <Flame
+              className={`w-4 h-4 md:w-5 md:h-5 transition-colors duration-500 ${flameClass}`}
+            />
 
-          {/* FOTO PROFIL (DESKTOP) */}
+            {/* Keep the number neutral gray */}
+            <span>{displayStreak}</span>
+          </Link>
+
+          {/* Profile photo (desktop) */}
           <Link to="/profile" className="hidden lg:block">
             <img
-              // LOGIKA: Jika user punya avatar, pakai itu. Jika tidak, pakai placeholder default.
               src={avatarSrc}
               alt="Profile"
-              className="w-8 h-8 md:w-10 md:h-10 rounded-full border-2 border-white/20 object-cover cursor-pointer hover:border-blue-400 transition-colors"
+              className="w-8 h-8 md:w-10 md:h-10 rounded-full border-2 border-border/60 object-cover cursor-pointer hover:border-brand-info transition-colors dark:border-border/70"
               onError={(event) => {
                 event.currentTarget.src = fallbackAvatar;
               }}
             />
           </Link>
 
-          {/* HAMBURGER MENU */}
+          {/* Hamburger menu */}
           <button
-            className="lg:hidden p-2 text-gray-600 hover:bg-black/5 rounded-xl transition-all ml-1 cursor-pointer"
+            className="lg:hidden p-2 text-text-secondary hover:bg-brand-primary/5 rounded-xl transition-all ml-1 cursor-pointer dark:text-text-secondary dark:hover:bg-surface/60"
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
           >
             {isMobileMenuOpen ? (
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-7 h-7"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.5}
+                stroke="currentColor"
+                className="w-7 h-7"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
             ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-7 h-7"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.5}
+                stroke="currentColor"
+                className="w-7 h-7"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+                />
+              </svg>
             )}
           </button>
         </div>
@@ -139,7 +219,7 @@ const Navbar = ({ user }) => {
                     overflow-hidden transition-all duration-300 ease-in-out
                     ${
                       isMobileMenuOpen
-                        ? "max-h-[400px] mt-4 pt-4 border-t border-gray-200 opacity-100"
+                        ? "max-h-[400px] mt-4 pt-4 border-t border-border opacity-100 dark:border-border"
                         : "max-h-0 opacity-0"
                     }
                 `}
@@ -153,8 +233,8 @@ const Navbar = ({ user }) => {
                         text-base font-semibold py-2 px-4 rounded-lg w-full text-center transition-colors
                         ${
                           isActive(link.href)
-                            ? "bg-blue-50 text-blue-600"
-                            : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                            ? "bg-brand-primary/10 text-brand-primary dark:bg-brand-primary/20 dark:text-brand-info"
+                            : "text-text-secondary hover:bg-surface-muted hover:text-text-primary dark:text-text-secondary dark:hover:bg-surface-muted dark:hover:text-text-primary"
                         }
                     `}
           >
@@ -162,22 +242,24 @@ const Navbar = ({ user }) => {
           </Link>
         ))}
 
-        <div className="w-full border-t border-gray-100 mt-2 pt-3 flex flex-col items-center">
+        <div className="w-full border-t border-border-subtle mt-2 pt-3 flex flex-col items-center dark:border-border">
           <Link
             to="/profile"
             onClick={() => setIsMobileMenuOpen(false)}
-            className="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer w-full justify-center"
+            className="flex items-center gap-3 p-2 rounded-xl hover:bg-surface-muted transition-colors cursor-pointer w-full justify-center dark:hover:bg-surface-muted"
           >
             {/* FOTO PROFIL (MOBILE) */}
             <img
               src={avatarSrc}
               alt="Profile"
-              className="w-9 h-9 rounded-full border border-gray-300 object-cover"
+              className="w-9 h-9 rounded-full border border-border object-cover dark:border-border"
               onError={(event) => {
                 event.currentTarget.src = fallbackAvatar;
               }}
             />
-            <span className="text-gray-700 font-semibold">My Profile</span>
+            <span className="text-text-secondary font-semibold dark:text-text-secondary">
+              My Profile
+            </span>
           </Link>
         </div>
       </div>

@@ -1,9 +1,19 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { Lock, User, ArrowLeft } from "lucide-react";
-import { BASE_URL } from "../../api/config";
-// Import Logo Nostressia
+import { adminLogin } from "../../services/authService";
+import {
+  hasAdminSession,
+  isAuthTokenValid,
+  persistAdminProfile,
+  persistAdminToken,
+} from "../../utils/auth";
+import { createLogger } from "../../utils/logger";
+import PageMeta from "../../components/PageMeta";
+// Nostressia logo asset.
 import LogoNostressia from "../../assets/images/Logo-Nostressia.png";
+
+const logger = createLogger("ADMIN_LOGIN");
 
 export default function AdminLogin() {
   const navigate = useNavigate();
@@ -11,150 +21,166 @@ export default function AdminLogin() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  useEffect(() => {
+    if (hasAdminSession()) {
+      navigate("/admin", { replace: true });
+    }
+  }, [navigate]);
+
+  const focusFirstEmptyField = (form) => {
+    const requiredFields = Array.from(form.querySelectorAll("[data-required='true']"));
+    const emptyField = requiredFields.find((field) => !field.value);
+    if (emptyField) {
+      emptyField.focus();
+      return true;
+    }
+    return false;
+  };
+
+  const handleFormKeyDown = (event) => {
+    if (event.key !== "Enter") return;
+    if (focusFirstEmptyField(event.currentTarget)) {
+      event.preventDefault();
+    }
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
     setIsLoading(true);
 
     try {
-      // --- coba login via API ---
-      const res = await fetch(`${BASE_URL}/auth/admin/login`, { // <-- backtick
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
+      // Attempt the primary admin login flow.
+      const data = await adminLogin(formData);
 
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.detail || "Username atau Password salah!");
+      // Persist the admin session using canonical storage keys.
+      const token = data?.accessToken;
+      if (!isAuthTokenValid(token)) {
+        setError("Login succeeded, but the token is invalid.");
+        setIsLoading(false);
+        return;
       }
-
-      // Jika berhasil login via API, simpan token & data
-      localStorage.setItem("adminToken", data.access_token);
-      localStorage.setItem("adminData", JSON.stringify(data.admin));
-      localStorage.setItem("adminAuth", "true");
+      persistAdminToken(token);
+      persistAdminProfile(data.admin);
 
       navigate("/admin");
-    } 
-    catch (err) {
-      console.error("Login API error:", err);
+    } catch (err) {
+      logger.error("Admin login API error:", err);
 
-      // ✅ Hanya jika API mati, baru cek username/password offline
+      // Provide a clearer message when the API is unreachable.
       if (
-        err.message.includes("Failed to fetch") ||  // fetch gagal
-        err.message.includes("NetworkError") ||     // network error
-        err.message.includes("timeout")             // atau timeout
+        err.message.includes("Failed to fetch") ||
+        err.message.includes("NetworkError") ||
+        err.message.includes("timeout")
       ) {
-        if (formData.username === "admin" && formData.password === "admin123") {
-          const offlineAdmin = {
-            id: 0,
-            name: "Offline Admin",
-            username: "admin",
-            email: "admin@offline.local"
-          };
-
-          localStorage.setItem("adminToken", "offline-token");
-          localStorage.setItem("adminData", JSON.stringify(offlineAdmin));
-          localStorage.setItem("adminAuth", "true");
-
-          console.warn("⚠️ API mati — menggunakan mode offline admin.");
-          navigate("/admin");
-          return;
-        }
+        setError("Unable to reach the admin service. Please check your connection and try again.");
+        setIsLoading(false);
+        return;
       }
 
-      // Jika bukan login offline, tampilkan error biasa
-      setError(err.message || "Gagal login, coba lagi.");
+      setError(err.message || "Login failed. Please try again.");
       setIsLoading(false);
     }
   };
 
-
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 font-sans">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
-        
-        {/* Header dengan Gradient Pastel Oren-Biru */}
-        <div className="bg-gradient-to-br from-orange-200 via-orange-100 to-blue-200 p-8 text-center relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-full bg-white/40 opacity-50 transform -rotate-6 scale-125"></div>
-            <div className="relative z-10 flex flex-col items-center">
-                <img 
-                    src={LogoNostressia} 
-                    alt="Nostressia Logo" 
-                    className="h-24 w-auto object-contain mb-2 drop-shadow-sm hover:scale-105 transition-transform duration-300" 
-                />
-                <h2 className="text-2xl font-bold text-gray-800">Admin Portal</h2>
-                <p className="text-gray-600 text-sm mt-1 font-medium">Nostressia Management System</p>
-            </div>
+    <div className="min-h-screen flex items-center justify-center bg-surface px-4 font-sans text-text-primary">
+      <PageMeta
+        title="Admin Login"
+        description="Access the Nostressia admin portal to manage users, tips, and motivations."
+        noindex
+      />
+      <div className="max-w-md w-full bg-surface-elevated glass-panel dark:bg-surface rounded-2xl shadow-xl overflow-hidden border border-border-subtle dark:border-border glass-panel-strong">
+        {/* Header with a pastel orange-blue gradient */}
+        <div className="bg-linear-to-br from-brand-warning/20 via-brand-warning/10 to-brand-primary/20 dark:from-brand-warning/20 dark:via-surface/80 dark:to-brand-primary/20 p-8 text-center relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-full bg-surface-elevated/40 glass-panel dark:bg-surface/40 opacity-50 transform -rotate-6 scale-125"></div>
+          <div className="relative z-10 flex flex-col items-center">
+            <img
+              src={LogoNostressia}
+              alt="Nostressia Logo"
+              className="h-24 w-auto object-contain mb-2 drop-shadow-sm hover:scale-105 transition-transform duration-300"
+            />
+            <h2 className="text-2xl font-bold text-text-primary dark:text-text-primary">
+              Admin Portal
+            </h2>
+            <p className="text-text-secondary dark:text-text-muted text-sm mt-1 font-medium">
+              Nostressia Management System
+            </p>
+          </div>
         </div>
 
         {/* Form Section */}
         <div className="p-8">
-          <form onSubmit={handleLogin} className="space-y-6">
-            
+          <form onSubmit={handleLogin} onKeyDown={handleFormKeyDown} className="space-y-6">
             {/* Error Message */}
             {error && (
-              <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg border border-red-100 text-center animate-pulse">
+              <div className="bg-brand-accent/10 dark:bg-brand-accent/20 text-brand-accent dark:text-brand-accent text-sm p-3 rounded-lg border border-brand-accent/20 dark:border-brand-accent/30 text-center animate-pulse">
                 {error}
               </div>
             )}
 
             <div className="space-y-4">
-                {/* Username Input */}
-                <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1 ml-1">Username</label>
-                    <div className="relative">
-                        <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                        <input
-                            type="text"
-                            placeholder="Masukan username admin"
-                            className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
-                            value={formData.username}
-                            onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                        />
-                    </div>
+              {/* Username Input */}
+              <div>
+                <label className="block text-xs font-bold text-text-muted dark:text-text-muted uppercase mb-1 ml-1">
+                  Username
+                </label>
+                <div className="relative">
+                  <User className="absolute left-4 top-1/2 z-2 -translate-y-1/2 text-text-muted dark:text-text-muted w-5 h-5" />
+                  <input
+                    type="text"
+                    placeholder="Enter admin username"
+                    className="w-full pl-12 pr-4 py-3 glass-input border border-border rounded-xl focus:bg-surface-elevated glass-panel focus:ring-2 focus:ring-brand-primary/20 focus:outline-none transition-all text-text-primary"
+                    value={formData.username}
+                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                    data-required="true"
+                  />
                 </div>
+              </div>
 
-                {/* Password Input */}
-                <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1 ml-1">Password</label>
-                    <div className="relative">
-                        <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                        <input
-                            type="password"
-                            placeholder="••••••••"
-                            className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
-                            value={formData.password}
-                            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                        />
-                    </div>
+              {/* Password Input */}
+              <div>
+                <label className="block text-xs font-bold text-text-muted dark:text-text-muted uppercase mb-1 ml-1">
+                  Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 z-2 -translate-y-1/2 text-text-muted dark:text-text-muted w-5 h-5" />
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    className="w-full pl-12 pr-4 py-3 glass-input border border-border rounded-xl focus:bg-surface-elevated glass-panel focus:ring-2 focus:ring-brand-primary/20 focus:outline-none transition-all text-text-primary"
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    data-required="true"
+                  />
                 </div>
+              </div>
             </div>
 
-            {/* Tombol dengan Gradasi Biru-Oren */}
+            {/* Button with a blue-orange gradient */}
             <button
               type="submit"
               disabled={isLoading}
               className={`w-full py-3.5 rounded-xl font-bold text-white shadow-lg shadow-blue-200 transition-all transform flex justify-center items-center ${
-                  isLoading 
-                    ? "bg-gray-400 cursor-not-allowed" 
-                    : "bg-gradient-to-r from-blue-500 to-orange-400 hover:from-blue-600 hover:to-orange-500 hover:-translate-y-0.5"
+                isLoading
+                  ? "bg-surface-muted text-text-muted cursor-not-allowed"
+                  : "bg-linear-to-r from-brand-primary to-brand-accent hover:from-brand-primary/90 hover:to-brand-accent/90 hover:-translate-y-0.5"
               }`}
             >
               {isLoading ? (
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
               ) : (
-                  "Masuk Dashboard"
+                "Enter Dashboard"
               )}
             </button>
           </form>
 
-          <div className="mt-8 pt-6 border-t border-gray-100 text-center">
-            <Link to="/" className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-gray-600 transition-colors">
-                <ArrowLeft size={16} /> Kembali ke Beranda User
+          <div className="mt-8 pt-6 border-t border-border-subtle text-center">
+            <Link
+              to="/"
+              className="inline-flex items-center gap-2 text-sm text-text-muted dark:text-text-muted hover:text-text-secondary dark:hover:text-text-primary transition-colors"
+            >
+              <ArrowLeft size={16} /> Back to User Home
             </Link>
           </div>
         </div>

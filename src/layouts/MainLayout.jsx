@@ -1,70 +1,92 @@
 // src/layouts/MainLayout.jsx
-import React, { useState, useEffect } from "react";
-import { Outlet } from "react-router-dom";
-import axios from "axios";
-import { BASE_URL } from "../api/config";
+import React, { useState, useEffect, useCallback } from "react";
+import { Outlet, useNavigate } from "react-router-dom";
+import { getProfile } from "../services/authService";
+import { getStressEligibility } from "../services/stressService";
+import { clearAuthToken, readAuthToken } from "../utils/auth";
+import { restoreDailyReminderSubscription } from "../utils/notificationService";
+import { createLogger } from "../utils/logger";
+import { resolveLegacyJson, storage, STORAGE_KEYS } from "../utils/storage";
+
+const logger = createLogger("LAYOUT");
+
+const normalizeGender = (value) => {
+  if (typeof value !== "string") return "";
+  return value.trim().toLowerCase();
+};
 
 export default function MainLayout() {
-  // 1. Ambil data awal dari Cache. 
-  // Jika ada data lengkap tersimpan (JSON), pakai itu. Jika tidak, pakai default.
+  const navigate = useNavigate();
+  // 1. Load initial data from cache.
+  // If a complete JSON payload exists, use it; otherwise fall back to defaults.
   const [user, setUser] = useState(() => {
-    const savedData = localStorage.getItem("cache_userData");
-    return savedData ? JSON.parse(savedData) : { name: "User", avatar: null };
+    const savedData = resolveLegacyJson({
+      key: STORAGE_KEYS.CACHE_USER_DATA,
+      legacyKeys: ["cache_userData"],
+      fallback: null,
+    });
+    return savedData || { name: "User", avatar: null };
   });
 
-  useEffect(() => {
-    const fetchUserData = async () => {
+  const fetchUserData = useCallback(async () => {
+    try {
+      const token = readAuthToken();
+      if (!token) return;
+
+      const backendData = await getProfile();
+
+      const normalizedDob = backendData.userDob || "";
+
+      const completeUserData = {
+        ...backendData,
+        name: backendData.name || "User",
+        username: backendData.username || "user",
+        email: backendData.email || "",
+        avatar: backendData.avatar || null,
+        birthday: normalizedDob,
+        userDob: normalizedDob,
+        gender: normalizeGender(backendData.gender || ""),
+        diaryCount: backendData.diaryCount ?? 0,
+      };
+
+      let streakCount = backendData.streak ?? null;
       try {
-        const token = localStorage.getItem("token");
-        if (!token) return;
-
-        const response = await axios.get(`${BASE_URL}/user/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        // 2. Data dari Backend
-        const backendData = response.data;
-
-        // 3. Normalisasi Data (Jaga-jaga nama field beda)
-        const completeUserData = {
-          ...backendData,
-          // Pastikan field utama selalu ada:
-          name:
-            backendData.name ||
-            backendData.full_name ||
-            backendData.fullName ||
-            "User",
-          userName:
-            backendData.userName ||
-            backendData.username ||
-            backendData.user_name ||
-            "user",
-          username:
-            backendData.username ||
-            backendData.userName ||
-            backendData.user_name ||
-            "user",
-          email: backendData.email || "",
-          avatar: backendData.avatar || backendData.profile_picture || null,
-          birthday:
-            backendData.birthday ||
-            backendData.birth_date ||
-            backendData.dob ||
-            "",
-          gender: backendData.gender || backendData.sex || "",
-        };
-
-        // 4. Update State & SIMPAN SEMUA KE CACHE (JSON)
-        setUser(completeUserData);
-        localStorage.setItem("cache_userData", JSON.stringify(completeUserData));
-
+        const eligibilityData = await getStressEligibility();
+        streakCount = eligibilityData?.streak ?? streakCount;
       } catch (error) {
-        console.error("Gagal update user data di layout:", error);
+        logger.warn("Failed to fetch eligibility data:", error);
       }
+
+      const enrichedUserData = {
+        ...completeUserData,
+        streak: streakCount ?? completeUserData.streak ?? 0,
+      };
+
+      setUser(enrichedUserData);
+      storage.setJson(STORAGE_KEYS.CACHE_USER_DATA, enrichedUserData);
+    } catch (error) {
+      logger.error("Failed to refresh user data in layout:", error);
+      if ([401, 403].includes(error?.status)) {
+        clearAuthToken();
+        storage.removeItem(STORAGE_KEYS.CACHE_USER_DATA);
+        navigate("/login", { replace: true });
+      }
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    fetchUserData();
+    restoreDailyReminderSubscription();
+
+    const handleRefresh = () => {
+      fetchUserData();
     };
 
-    fetchUserData();
-  }, []);
+    window.addEventListener("nostressia:user-update", handleRefresh);
+    return () => {
+      window.removeEventListener("nostressia:user-update", handleRefresh);
+    };
+  }, [fetchUserData]);
 
   return <Outlet context={{ user }} />;
 }
